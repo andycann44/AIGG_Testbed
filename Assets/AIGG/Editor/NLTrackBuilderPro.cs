@@ -43,8 +43,8 @@ namespace Aim2Pro.AIGG.Track
         {
             // NL (single line)
             GUILayout.Label("Natural Language", EditorStyles.boldLabel);
-            var nlRect = GUILayoutUtility.GetRect(10, 20, GUILayout.ExpandWidth(true));
-            nl = EditorGUI.TextField(nlRect, nl);
+            // replace the fixed rect + TextField with a resizable TextArea
+            nl = EditorGUILayout.TextArea(nl, GUILayout.MinHeight(60), GUILayout.ExpandWidth(true));
 
             // Row A: Build / Append / Clear
             GUILayout.Space(4);
