@@ -1,0 +1,53 @@
+﻿{
+  "version": "v1",
+  "types": ["scenePlan","track","character","scenery"],
+  "scenePlan": {
+    "required": ["name","grid","trackTemplate","difficulty","progression","layers","camera"],
+    "fields": {
+      "name": "string",
+      "grid": {
+        "cols": "int",
+        "rows": "int",
+        "dx": "float",
+        "dy": "float",
+        "origin": {"x":"float","y":"float"}
+      },
+      "trackTemplate": {
+        "lanes": "int",
+        "segments": ["string"],
+        "lengthUnits": "int",
+        "tileWidth": "float",
+        "zones": {
+          "start": {"size":{"x":"int","y":"int"}},
+          "end":   {"size":{"x":"int","y":"int"}}
+        },
+        "killZone": {"y":"float","height":"float"}
+      },
+      "difficulty": {
+        "tracks": "int",
+        "playerSpeed": {"start":"float","deltaPerTrack":"float"},
+        "jumpForce": "float",
+        "gapProbability": {"start":"float","deltaPerTrack":"float","max":"float"},
+        "gapRules": {"noAtSpawn":"bool","noAdjacentGaps":"bool","maxGapWidth":"int"}
+      },
+      "progression": {
+        "ordering": {"enum":["snakeRows","rowMajor","colMajor"]},
+        "carrier": {
+          "type": {"enum":["dartboardTaxi"]},
+          "attachKinematic":"bool",
+          "moveSpeed":"float"
+        }
+      },
+      "layers": {"track":"string","player":"string","killZone":"string"},
+      "camera": {"offsetX":"float","offsetY":"float","smooth":"float"}
+    },
+    "defaults": {
+      "grid":{"cols":3,"dx":30,"dy":18,"origin":{"x":0,"y":0}},
+      "trackTemplate":{"lanes":1,"segments":["straight","straight","straight"],"lengthUnits":40,"tileWidth":1,"zones":{"start":{"size":{"x":2,"y":3}},"end":{"size":{"x":2,"y":3}}},"killZone":{"y":-5,"height":2}},
+      "difficulty":{"tracks":3,"playerSpeed":{"start":5.0,"deltaPerTrack":0.35},"jumpForce":9.0,"gapProbability":{"start":0.02,"deltaPerTrack":0.02,"max":0.35},"gapRules":{"noAtSpawn":true,"noAdjacentGaps":true,"maxGapWidth":1}},
+      "progression":{"ordering":"snakeRows","carrier":{"type":"dartboardTaxi","attachKinematic":true,"moveSpeed":5.0}},
+      "layers":{"track":"Track","player":"Player","killZone":"KillZone"},
+      "camera":{"offsetX":2,"offsetY":1,"smooth":0.15}
+    }
+  }
+}
