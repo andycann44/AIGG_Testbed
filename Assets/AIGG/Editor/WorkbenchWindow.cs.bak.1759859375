@@ -1,0 +1,212 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEngine;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
+
+namespace Aim2Pro.AIGG
+{
+    public class WorkbenchWindow : EditorWindow
+    {
+        [SerializeField] private string _prompt = "";
+        [SerializeField] private string _diagnostics = "";
+        [SerializeField] private string _json = "";
+        [SerializeField] private string _selectedUnmatched = "";
+        [SerializeField] private Vector2 _scrollPrompt, _scrollDiag, _scrollJson;
+
+        [MenuItem("Window/Aim2Pro/Workbench")]
+        public static void Open()
+        {
+            var win = GetWindow<WorkbenchWindow>("Workbench");
+            win.minSize = new Vector2(640, 420);
+            win.Show();
+        }
+
+        void OnGUI()
+        {
+            GUILayout.Label("Natural language prompt", EditorStyles.boldLabel);
+            _scrollPrompt = EditorGUILayout.BeginScrollView(_scrollPrompt, GUILayout.MinHeight(80));
+            _prompt = EditorGUILayout.TextArea(_prompt ?? string.Empty, GUILayout.MinHeight(80));
+            EditorGUILayout.EndScrollView();
+
+            if (GUILayout.Button("Parse NL (intents)", GUILayout.Height(26)))
+                ParseLocal();
+
+            EditorGUILayout.Space(6);
+            GUILayout.Label("Diagnostics", EditorStyles.boldLabel);
+            _scrollDiag = EditorGUILayout.BeginScrollView(_scrollDiag, GUILayout.MinHeight(120));
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(_diagnostics ?? "", EditorStyles.wordWrappedLabel);
+                EditorGUILayout.Space(4);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _selectedUnmatched = EditorGUILayout.TextField("Unmatched phrase", _selectedUnmatched ?? "");
+                    if (GUILayout.Button("Copy skeleton intent", GUILayout.Width(170)))
+                        CopySkeletonIntent(_selectedUnmatched);
+                }
+            }
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.Space(6);
+            GUILayout.Label("JSON Output", EditorStyles.boldLabel);
+            _scrollJson = EditorGUILayout.BeginScrollView(_scrollJson, GUILayout.MinHeight(140));
+            _json = EditorGUILayout.TextArea(_json ?? "", GUILayout.MinHeight(140));
+            EditorGUILayout.EndScrollView();
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Open Paste & Merge", GUILayout.Height(26)))
+                    OpenMergeWithJson(_json);
+
+                if (GUILayout.Button("Reveal Canonical", GUILayout.Height(26)))
+                    EditorGUIUtility.systemCopyBuffer = _json ?? "";
+            }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.HelpBox(
+                "Flow: normalize → NLToJson → AIGG_NLInterpreter → JSON.\nIf nothing matches, unmatched terms appear above. Use 'Copy skeleton intent' then Paste & Merge.",
+                MessageType.Info);
+        }
+
+        static string Normalize(string s) => (s ?? "").Trim();
+
+        void ParseLocal()
+        {
+            _diagnostics = "";
+            _json = "";
+
+            var input = Normalize(_prompt);
+            if (string.IsNullOrEmpty(input))
+            {
+                _diagnostics = "Input is empty.";
+                return;
+            }
+
+            // 1) Normalize preview
+            var normalized = CallOptional<string>(null, "Aim2Pro.AIGG.Local.NL", "Normalize", new object[]{ input }) ?? input;
+
+            // 2) Try NLToJson
+            string json = InvokeStatic<string>("NLToJson", "GenerateFromPrompt", normalized);
+            // 3) Fallback: AIGG_NLInterpreter.RunToJson / Run
+            if (string.IsNullOrEmpty(json))
+                json = InvokeInstance<string>("AIGG_NLInterpreter", new[] { "RunToJson", "Run" }, normalized);
+
+            // 4) Build diagnostics from spec files
+            var tokens = Tokenize(normalized);
+            var dict = LoadSpecDictionaries();
+            var (matched, unmatched) = Classify(tokens, dict);
+
+            _diagnostics =
+                $"Normalized:\n  {normalized}\n\n" +
+                $"Matched ({matched.Count}):\n  {string.Join(\", \", matched.Distinct())}\n\n" +
+                $"Unmatched ({unmatched.Count}):\n  {string.Join(\", \", unmatched.Distinct())}\n\n" +
+                (string.IsNullOrEmpty(json)
+                    ? "No JSON produced by local parsers.\n→ Create intents/macros for the unmatched phrase(s), then try again."
+                    : "Local parsers produced JSON.\n→ You can Open Paste & Merge.");
+
+            _json = json ?? "";
+        }
+
+        static List<string> Tokenize(string s)
+        {
+            var raw = s.ToLowerInvariant();
+            var seps = new char[] {' ', ',', ';', '.', ':', '(', ')'};
+            return raw.Split(seps, StringSplitOptions.RemoveEmptyEntries).ToList();
+        }
+
+        static (List<string> matched, List<string> unmatched) Classify(List<string> tokens, HashSet<string> dict)
+        {
+            var matched = new List<string>();
+            var unmatched = new List<string>();
+            foreach (var t in tokens)
+                if (dict.Contains(t)) matched.Add(t);
+                else if (t.All(c => char.IsDigit(c))) matched.Add(t); // numbers are fine
+                else unmatched.Add(t);
+            return (matched, unmatched);
+        }
+
+        static HashSet<string> LoadSpecDictionaries()
+        {
+            // Pull words from your JSON specs in Resources/Spec (intents, macros, lexicon)
+            var set = new HashSet<string>();
+            void Add(TextAsset ta)
+            {
+                if (ta == null) return;
+                var l = ta.text.ToLowerInvariant();
+                // crude word scrape is enough for diagnostics
+                foreach (var w in l.Split(new[]{'\"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
+                    StringSplitOptions.RemoveEmptyEntries))
+                    set.Add(w);
+            }
+
+            Add(Resources.Load<TextAsset>("Spec/intents"));
+            Add(Resources.Load<TextAsset>("Spec/macros"));
+            Add(Resources.Load<TextAsset>("Spec/lexicon"));
+            Add(Resources.Load<TextAsset>("Spec/commands"));
+            return set;
+        }
+
+        static T InvokeStatic<T>(string typeName, string method, params object[] args)
+        {
+            var t = Type.GetType(typeName);
+            var m = t?.GetMethod(method, BindingFlags.Public | BindingFlags.Static);
+            if (m == null) return default;
+            try { return (T)m.Invoke(null, args); } catch { return default; }
+        }
+
+        static T InvokeInstance<T>(string typeName, string[] methods, params object[] args)
+        {
+            var t = Type.GetType(typeName);
+            if (t == null) return default;
+            var inst = Activator.CreateInstance(t);
+            foreach (var name in methods)
+            {
+                var m = t.GetMethod(name, BindingFlags.Public | BindingFlags.Instance);
+                if (m == null) continue;
+                try { return (T)m.Invoke(inst, args); } catch { }
+            }
+            return default;
+        }
+
+        static void OpenMergeWithJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                Debug.LogWarning("[AIGG] No JSON to send to Paste & Merge.");
+                return;
+            }
+
+            var t = Type.GetType("SpecPasteMergeWindow");
+            var openWith = t?.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.Static);
+            if (openWith != null) { openWith.Invoke(null, new object[] { json }); return; }
+
+            // Fallback: open and copy to clipboard
+            EditorGUIUtility.systemCopyBuffer = json;
+            if (t != null) EditorWindow.GetWindow(t, false, "Spec Paste & Merge");
+            Debug.Log("[AIGG] Spec JSON copied to clipboard → open Paste & Merge and paste.");
+        }
+
+        static void CopySkeletonIntent(string phrase)
+        {
+            phrase = (phrase ?? "").Trim();
+            if (phrase.Length == 0) { Debug.LogWarning("[AIGG] Enter a phrase from 'Unmatched' to scaffold."); return; }
+
+            // Minimal skeleton; you’ll tweak fields in Paste & Merge.
+            var skeleton =
+$@"{{
+  ""intent"": ""{phrase}"",
+  ""slots"": [],
+  ""examples"": [ ""{phrase}"" ],
+  ""commands"": [
+    {{ ""op"": ""insertStraight"", ""length_m"": 50, ""gaps"": ""auto"" }}
+  ]
+}}";
+            EditorGUIUtility.systemCopyBuffer = skeleton;
+            Debug.Log("[AIGG] Skeleton intent copied to clipboard. Open Paste & Merge and paste to add.");
+        }
+    }
+}
+#endif

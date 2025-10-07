@@ -2,152 +2,333 @@
 using UnityEditor;
 using UnityEngine;
 using System;
-using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
 
-// Workbench with proper DTO-based canonical JSON writer
-namespace Aim2Pro.AIGG {
-  public class WorkbenchWindow : EditorWindow {
-    // Injected: NL input state
-    string nlText = "";
+namespace Aim2Pro.AIGG
+{
+    /// <summary>
+    /// Workbench (local-only): NL → (NLToJson | AIGG_NLInterpreter) → JSON
+    /// Diagnostics show matched/unmatched tokens by SPEC source (intents/macros/lexicon/commands).
+    /// No OpenAI calls here per plan.
+    /// </summary>
+    public class WorkbenchWindow : EditorWindow
+    {
+        [SerializeField] private string _prompt = "";
+        [SerializeField] private string _diagnostics = "";
+        [SerializeField] private string _json = "";
+        [SerializeField] private string _selectedUnmatched = "";
+        [SerializeField] private Vector2 _scrollPrompt, _scrollDiag, _scrollJson;
 
-    [Serializable] class Resp { public string mode; public string test; public string input; public string timestamp; }
+        // Cached reflection
+        static readonly Dictionary<(string,string,bool), MethodInfo> _miCache = new();
 
-    // Canonical DTOs (Unity-serializable)
-    [Serializable] class CanonicalSpec {
-      public string type="scenePlan";
-      public string name="Quick Plan";
-      public Grid grid=new Grid();
-      public TrackTemplate trackTemplate=new TrackTemplate();
-      public Difficulty difficulty=new Difficulty();
-      public Progression progression=new Progression();
-      public Layers layers=new Layers();
-      public CameraCfg camera=new CameraCfg();
-      public Meta meta=new Meta();
-    }
-    [Serializable] class Grid { public int cols=1, rows=1; public float dx=30, dy=18; public Vec2 origin=new Vec2(); }
-    [Serializable] class Vec2 { public float x=0, y=0; }
-    [Serializable] class TrackTemplate {
-      public int lanes=1;
-      public string[] segments=new string[]{"straight"};
-      public float lengthUnits=14;
-      public float tileWidth=1;
-      public Zones zones=new Zones();
-      public KillZone killZone=new KillZone();
-    }
-    [Serializable] class Zones { public Zone start=new Zone(); public Zone end=new Zone(); }
-    [Serializable] class Zone { public Vec2 size=new Vec2{ x=2, y=3 }; }
-    [Serializable] class KillZone { public float y=-5, height=2; }
-    [Serializable] class Difficulty {
-      public int tracks=1;
-      public PlayerSpeed playerSpeed=new PlayerSpeed();
-      public float jumpForce=9;
-      public GapProbability gapProbability=new GapProbability();
-      public GapRules gapRules=new GapRules();
-    }
-    [Serializable] class PlayerSpeed { public float start=6, deltaPerTrack=0.35f; }
-    [Serializable] class GapProbability { public float start=0.02f, deltaPerTrack=0.02f, max=0.35f; }
-    [Serializable] class GapRules { public bool noAtSpawn=true, noAdjacentGaps=true; public int maxGapWidth=1; }
-    [Serializable] class Progression { public string ordering="rowMajor"; public Carrier carrier=new Carrier(); }
-    [Serializable] class Carrier { public string type="dartboardTaxi"; public bool attachKinematic=true; public float moveSpeed=7; }
-    [Serializable] class Layers { public string track="Track", player="Player", killZone="KillZone"; }
-    [Serializable] class CameraCfg { public float offsetX=2, offsetY=1, smooth=0.15f; }
-    [Serializable] class Meta { public string slope="flat"; public float slopeDegrees=0, amplitude=1.5f, wavelength=6f; }
-
-    string nlInput = "";
-    string jsonOut = "{}";
-
-    [MenuItem("Window/Aim2Pro/Workbench/Workbench")]
-    public static void Open(){ var w=GetWindow<WorkbenchWindow>("Workbench"); w.minSize=new Vector2(640,420); }
-
-    void OnGUI(){
-        // Injected: NL prompt UI
-        GUILayout.Space(8);
-        EditorGUILayout.LabelField("Natural language prompt", EditorStyles.boldLabel);
-        nlText = EditorGUILayout.TextArea(nlText, GUILayout.MinHeight(80));
-
-        if (GUILayout.Button("Parse NL (Intents)")) {
-            try {
-                var json = Aim2Pro.AIGG.Local.IntentRunner.RunFromNL(nlText);
-                
-  { var fld = this.GetType().GetField("jsonSpecInline",
-      (System.Reflection.BindingFlags)(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public));
-    if (fld != null) { fld.SetValue(this, json); Repaint(); }
-    else { UnityEditor.EditorGUIUtility.systemCopyBuffer = json; Debug.Log("AIGG: JSON copied to clipboard — paste into jsonSpecInline"); } }
-                Debug.Log("AIGG: NL -> intents -> scenePlan set in jsonSpecInline");
-            } catch (Exception e) { Debug.LogError("AIGG intents parse error: "+e.Message); }
+        [MenuItem("Window/Aim2Pro/Workbench")]
+        public static void Open()
+        {
+            var win = GetWindow<WorkbenchWindow>("Workbench");
+            win.minSize = new Vector2(760, 480);
+            win.Show();
         }
 
-      var s=AIGGSettings.LoadOrCreate(); if(!s){ EditorGUILayout.HelpBox("Missing AIGG Settings.", MessageType.Error); return; }
-      GUILayout.Label("AIGG Workbench", EditorStyles.boldLabel);
+        void OnGUI()
+        {
+            GUILayout.Label("Natural language prompt", EditorStyles.boldLabel);
+            _scrollPrompt = EditorGUILayout.BeginScrollView(_scrollPrompt, GUILayout.MinHeight(90));
+            _prompt = EditorGUILayout.TextArea(_prompt ?? string.Empty, GUILayout.MinHeight(90));
+            EditorGUILayout.EndScrollView();
 
-      using(new EditorGUILayout.HorizontalScope()){
-        EditorGUILayout.LabelField("Mode", GUILayout.Width(50));
-        s.mode=(AIGGMode)EditorGUILayout.EnumPopup(s.mode, GUILayout.Width(150));
-        GUILayout.Space(10);
-        if(GUILayout.Button("AI Test", GUILayout.Width(110))){
-          var r=new Resp{ mode=s.mode.ToString(), test=(s.mode==AIGGMode.LOCAL?"hello Andy":"hello Andy from AIGG"), input=(nlInput??"").Trim(), timestamp=DateTime.UtcNow.ToString("o") };
-          jsonOut=JsonUtility.ToJson(r,true);
-          Debug.Log($"AIGG/WB: AI Test → {r.test} (mode={r.mode})");
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Parse NL (local intents)", GUILayout.Height(26)))
+                    ParseLocal();
+                if (GUILayout.Button("Open Paste & Merge", GUILayout.Height(26)))
+                    OpenMergeWithJson(_json);
+                if (GUILayout.Button("Copy skeleton intent", GUILayout.Height(26)))
+                    CopySkeletonIntent(_selectedUnmatched);
+            }
+
+            EditorGUILayout.Space(8);
+            GUILayout.Label("Diagnostics (normalized, matched by source, unmatched chips)", EditorStyles.boldLabel);
+            _scrollDiag = EditorGUILayout.BeginScrollView(_scrollDiag, GUILayout.MinHeight(160));
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(_diagnostics ?? "", EditorStyles.wordWrappedLabel);
+                EditorGUILayout.Space(4);
+
+                // Unmatched chips row
+                var unmatched = _lastUnmatched ?? Array.Empty<string>();
+                if (unmatched.Length > 0)
+                {
+                    GUILayout.Label("Unmatched:", EditorStyles.miniBoldLabel);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        foreach (var u in unmatched.Distinct())
+                        {
+                            if (GUILayout.Button(u, GUILayout.Height(22)))
+                                _selectedUnmatched = u;
+                        }
+                    }
+                }
+
+                // Selected box
+                _selectedUnmatched = EditorGUILayout.TextField("Unmatched phrase", _selectedUnmatched ?? "");
+            }
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.Space(6);
+            GUILayout.Label("JSON Output", EditorStyles.boldLabel);
+            _scrollJson = EditorGUILayout.BeginScrollView(_scrollJson, GUILayout.MinHeight(180));
+            _json = EditorGUILayout.TextArea(_json ?? "", GUILayout.MinHeight(180));
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.HelpBox(
+                "Flow: normalize → NLToJson → AIGG_NLInterpreter → JSON.\n" +
+                "Diagnostics show which SPEC files (intents/macros/lexicon/commands) contain your tokens.\n" +
+                "If JSON is empty: click a chip, 'Copy skeleton intent', then paste it in Paste & Merge.",
+                MessageType.Info);
         }
-        if(GUILayout.Button("API Settings…", GUILayout.Width(120))) ApiSettingsWindow.Open();
-        GUILayout.FlexibleSpace();
-      }
 
-      EditorGUILayout.Space();
-      EditorGUILayout.LabelField("Natural Language Input");
-      nlInput = EditorGUILayout.TextArea(nlInput, GUILayout.MinHeight(120));
+        // -------------------- main flow --------------------
 
-      EditorGUILayout.Space();
-      using(new EditorGUILayout.HorizontalScope()){
-        if(GUILayout.Button("Make Canonical", GUILayout.Height(26), GUILayout.Width(160))){
-          var canonical = BuildCanonicalDTO(nlInput);
-          var json = JsonUtility.ToJson(canonical, true);
-          jsonOut = json;
-          WriteCanonical(json);
+        static string Normalize(string s)
+        {
+            s = (s ?? "").Trim();
+            // Optional shim: if you kept Local.NL.Normalize
+            var shim = CallOptional<string>(null, "Aim2Pro.AIGG.Local.NL", "Normalize", new object[]{ s });
+            return string.IsNullOrEmpty(shim) ? s : shim;
         }
-        if(GUILayout.Button("Reveal Canonical", GUILayout.Height(26), GUILayout.Width(160))){
-          var p = CanonicalPath(); if(File.Exists(p)) EditorUtility.RevealInFinder(p); else Debug.LogWarning("AIGG/WB: canonical not found: "+p);
-        }
-        GUILayout.FlexibleSpace();
-      }
 
-      EditorGUILayout.Space();
-      EditorGUILayout.LabelField("JSON Output");
-      using(new EditorGUI.DisabledScope(true)){
-        jsonOut = EditorGUILayout.TextArea(string.IsNullOrEmpty(jsonOut)?"{}":jsonOut, GUILayout.MinHeight(160));
-      }
-      EditorGUILayout.HelpBox("Make Canonical writes StickerDash_Status/LastCanonical.json.\nThen use Scene Creator → Build From Canonical.", MessageType.Info);
+        void ParseLocal()
+        {
+            _diagnostics = "";
+            _json = "";
+
+            var input = ( _prompt ?? "" ).Trim();
+            if (string.IsNullOrEmpty(input))
+            {
+                _diagnostics = "Input is empty.";
+                _lastUnmatched = Array.Empty<string>();
+                return;
+            }
+
+            var normalized = Normalize(input);
+
+            // 1) Try NLToJson
+            string json = InvokeStatic<string>("NLToJson", "GenerateFromPrompt", normalized);
+
+            // 2) Fallback: AIGG_NLInterpreter.RunToJson / Run
+            if (string.IsNullOrEmpty(json))
+                json = InvokeInstance<string>("AIGG_NLInterpreter", new[] { "RunToJson", "Run" }, normalized);
+
+            // 3) Diagnostics by source file
+            var tokens = Tokenize(normalized);
+            var dicts = LoadSpecSetsBySource();
+            var matchedBySource = new Dictionary<string, List<string>>
+            {
+                { "intents", new List<string>() },
+                { "macros", new List<string>() },
+                { "lexicon", new List<string>() },
+                { "commands", new List<string>() }
+            };
+            var unmatched = new List<string>();
+
+            foreach (var t in tokens)
+            {
+                if (IsNumeric(t)) { matchedBySource["lexicon"].Add(t); continue; }
+
+                bool any = false;
+                foreach (var kv in dicts)
+                {
+                    if (kv.Value.Contains(t)) { matchedBySource[kv.Key].Add(t); any = true; }
+                }
+                if (!any) unmatched.Add(t);
+            }
+
+            _lastUnmatched = unmatched.Distinct().ToArray();
+
+            _diagnostics =
+                $"Normalized:\n  {normalized}\n\n" +
+                $"Matched (by source):\n" +
+                $"  intents:  {string.Join(\", \", matchedBySource[\"intents\"].Distinct())}\n" +
+                $"  macros:   {string.Join(\", \", matchedBySource[\"macros\"].Distinct())}\n" +
+                $"  lexicon:  {string.Join(\", \", matchedBySource[\"lexicon\"].Distinct())}\n" +
+                $"  commands: {string.Join(\", \", matchedBySource[\"commands\"].Distinct())}\n\n" +
+                $"Unmatched ({_lastUnmatched.Length}):\n  {string.Join(\", \", _lastUnmatched)}\n\n" +
+                (string.IsNullOrEmpty(json)
+                    ? "No JSON produced by local parsers.\n→ Create intents/macros for unmatched phrase(s), then try again."
+                    : "Local parsers produced JSON.\n→ You can Open Paste & Merge.");
+
+            _json = json ?? "";
+        }
+
+        // -------------------- diagnostics helpers --------------------
+
+        static List<string> Tokenize(string s)
+        {
+            var raw = s.ToLowerInvariant();
+            var seps = new char[] {' ', ',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '/', '\\', '|', '-', '+'};
+            return raw.Split(seps, StringSplitOptions.RemoveEmptyEntries).ToList();
+        }
+
+        static bool IsNumeric(string s) => s.All(c => char.IsDigit(c));
+
+        // Loads token sets per SPEC source (Editor-safe via AssetDatabase; fallback to Resources)
+        static Dictionary<string, HashSet<string>> LoadSpecSetsBySource()
+        {
+            var map = new Dictionary<string, HashSet<string>>
+            {
+                { "intents",  new HashSet<string>() },
+                { "macros",   new HashSet<string>() },
+                { "lexicon",  new HashSet<string>() },
+                { "commands", new HashSet<string>() }
+            };
+
+            // Preferred (Editor): Assets/AIGG/Spec/*.json
+            AddWordsFromJson("Assets/AIGG/Spec/intents.json", map["intents"]);
+            AddWordsFromJson("Assets/AIGG/Spec/macros.json", map["macros"]);
+            AddWordsFromJson("Assets/AIGG/Spec/lexicon.json", map["lexicon"]);
+            AddWordsFromJson("Assets/AIGG/Spec/commands.json", map["commands"]);
+
+            // Fallback (Runtime-like): Resources/Spec/*
+            if (map.All(kv => kv.Value.Count == 0))
+            {
+                AddWordsFromResources("Spec/intents",   map["intents"]);
+                AddWordsFromResources("Spec/macros",    map["macros"]);
+                AddWordsFromResources("Spec/lexicon",   map["lexicon"]);
+                AddWordsFromResources("Spec/commands",  map["commands"]);
+            }
+            return map;
+        }
+
+        static void AddWordsFromJson(string assetPath, HashSet<string> set)
+        {
+            var ta = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
+            if (ta == null) return;
+            var l = ta.text.ToLowerInvariant();
+            foreach (var w in l.Split(new[]{'\"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
+                StringSplitOptions.RemoveEmptyEntries))
+                set.Add(w);
+        }
+
+        static void AddWordsFromResources(string resPath, HashSet<string> set)
+        {
+            var ta = Resources.Load<TextAsset>(resPath);
+            if (ta == null) return;
+            var l = ta.text.ToLowerInvariant();
+            foreach (var w in l.Split(new[]{'\"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
+                StringSplitOptions.RemoveEmptyEntries))
+                set.Add(w);
+        }
+
+        // -------------------- reflection helpers (cached) --------------------
+
+        static T InvokeStatic<T>(string typeName, string method, params object[] args)
+        {
+            var t = ResolveType(typeName);
+            if (t == null) return default;
+            var key = (typeName, method, true);
+            if (!_miCache.TryGetValue(key, out var m) || m == null)
+            {
+                m = t.GetMethod(method, BindingFlags.Public | BindingFlags.Static);
+                _miCache[key] = m;
+            }
+            if (m == null) return default;
+            try { return (T)m.Invoke(null, args); } catch { return default; }
+        }
+
+        static T InvokeInstance<T>(string typeName, string[] methods, params object[] args)
+        {
+            var t = ResolveType(typeName);
+            if (t == null) return default;
+            var inst = Activator.CreateInstance(t);
+            foreach (var name in methods)
+            {
+                var key = (typeName, name, false);
+                if (!_miCache.TryGetValue(key, out var m) || m == null)
+                {
+                    m = t.GetMethod(name, BindingFlags.Public | BindingFlags.Instance);
+                    _miCache[key] = m;
+                }
+                if (m == null) continue;
+                try { return (T)m.Invoke(inst, args); } catch { }
+            }
+            return default;
+        }
+
+        static T CallOptional<T>(object instance, string typeName, string methodName, object[] args)
+        {
+            if (string.IsNullOrEmpty(typeName) || string.IsNullOrEmpty(methodName)) return default;
+            var t = ResolveType(typeName);
+            if (t == null) return default;
+
+            bool isStatic = (instance == null);
+            var key = (typeName, methodName, isStatic);
+            if (!_miCache.TryGetValue(key, out var m) || m == null)
+            {
+                m = t.GetMethod(methodName,
+                    (isStatic ? BindingFlags.Static : BindingFlags.Instance) | BindingFlags.Public);
+                _miCache[key] = m;
+            }
+            if (m == null) return default;
+
+            try { return (T)m.Invoke(instance, args); } catch { return default; }
+        }
+
+        static Type ResolveType(string typeName)
+        {
+            var t = Type.GetType(typeName);
+            if (t != null) return t;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var n = asm.GetName().Name ?? "";
+                if (!(n.StartsWith("Assembly-CSharp") || n.StartsWith("AIGG"))) continue;
+                t = asm.GetType(typeName);
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        // -------------------- actions --------------------
+
+        static void OpenMergeWithJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                Debug.LogWarning("[AIGG] No JSON to send to Paste & Merge.");
+                return;
+            }
+
+            var t = ResolveType("SpecPasteMergeWindow");
+            var openWith = t?.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.Static);
+            if (openWith != null) { openWith.Invoke(null, new object[] { json }); return; }
+
+            EditorGUIUtility.systemCopyBuffer = json;
+            if (t != null) EditorWindow.GetWindow(t, false, "Spec Paste & Merge");
+            Debug.Log("[AIGG] Spec JSON copied to clipboard → open Paste & Merge and paste.");
+        }
+
+        static void CopySkeletonIntent(string phrase)
+        {
+            phrase = (phrase ?? "").Trim();
+            if (phrase.Length == 0) { Debug.LogWarning("[AIGG] Click a chip or enter an unmatched phrase first."); return; }
+
+            var skeleton =
+$@"{{
+  ""intent"": ""{phrase}"",
+  ""slots"": [],
+  ""examples"": [ ""{phrase}"" ],
+  ""commands"": [
+    {{ ""op"": ""insertStraight"", ""length_m"": 50 }}
+  ]
+}}";
+            EditorGUIUtility.systemCopyBuffer = skeleton;
+            Debug.Log("[AIGG] Skeleton intent copied to clipboard. Paste into Paste & Merge.");
+        }
+
+        // state
+        static string[] _lastUnmatched = Array.Empty<string>();
     }
-
-    static string CanonicalPath(){ var root=Directory.GetParent(Application.dataPath).FullName; return Path.Combine(root,"StickerDash_Status/LastCanonical.json"); }
-    static void WriteCanonical(string json){ var p=CanonicalPath(); Directory.CreateDirectory(Path.GetDirectoryName(p)); File.WriteAllText(p,json,Encoding.UTF8); Debug.Log("AIGG/WB: wrote canonical → "+p); }
-
-    static CanonicalSpec BuildCanonicalDTO(string nl){
-      nl=(nl??"").ToLowerInvariant();
-      var spec=new CanonicalSpec();
-
-      // length by seconds or meters
-      float lengthUnits=14f;
-      var mSec=Regex.Match(nl,@"(\d+(?:\.\d+)?)\s*(?:s|sec|secs|seconds)\b");
-      var mSpd=Regex.Match(nl,@"(?:speed|at)\s*(\d+(?:\.\d+)?)\s*(?:u/s|m/s|units/s|units/sec)");
-      var mMet=Regex.Match(nl,@"(\d+(?:\.\d+)?)\s*(?:m|meter|metre|meters|metres|units)\b");
-      if(mSec.Success){ var secs=float.Parse(mSec.Groups[1].Value); var spd=mSpd.Success?float.Parse(mSpd.Groups[1].Value):6f; lengthUnits=Mathf.Max(1f,secs*spd); }
-      else if(mMet.Success){ lengthUnits=Mathf.Max(1f,float.Parse(mMet.Groups[1].Value)); }
-      spec.trackTemplate.lengthUnits = Mathf.Round(lengthUnits);
-
-      // slope / hills
-      string slope="flat"; float slopeDeg=0f, amp=1.5f, wave=6f;
-      if(Regex.IsMatch(nl,@"\b(ramp up|uphill|incline|slope up)\b")){ slope="rampUp"; var d=Regex.Match(nl,@"(\d+(?:\.\d+)?)\s*deg"); slopeDeg=d.Success?float.Parse(d.Groups[1].Value):8f; }
-      else if(Regex.IsMatch(nl,@"\b(ramp down|downhill|decline|slope down)\b")){ slope="rampDown"; var d=Regex.Match(nl,@"(\d+(?:\.\d+)?)\s*deg"); slopeDeg=d.Success?float.Parse(d.Groups[1].Value):8f; }
-      else if(Regex.IsMatch(nl,@"\b(hills|rolling|wavy|waves|undulating)\b")){ slope="hills"; var a=Regex.Match(nl,@"amp(?:litude)?\s*(\d+(?:\.\d+)?)"); var w=Regex.Match(nl,@"wave(?:length)?\s*(\d+(?:\.\d+)?)"); if(a.Success) amp=float.Parse(a.Groups[1].Value); if(w.Success) wave=float.Parse(w.Groups[1].Value); }
-
-      spec.trackTemplate.segments = slope=="rampUp" ? new[]{"rampUp"} : slope=="rampDown" ? new[]{"rampDown"} : slope=="hills" ? new[]{"hills"} : new[]{"straight"};
-      spec.meta.slope = slope; spec.meta.slopeDegrees = slopeDeg; spec.meta.amplitude = amp; spec.meta.wavelength = wave;
-
-      return spec;
-    }
-  }
 }
 #endif

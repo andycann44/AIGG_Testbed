@@ -1,0 +1,82 @@
+﻿{
+    "type": "scenePlan",
+    "name": "Quick Plan",
+    "grid": {
+        "cols": 1,
+        "rows": 1,
+        "dx": 30.0,
+        "dy": 18.0,
+        "origin": {
+            "x": 0.0,
+            "y": 0.0
+        }
+    },
+    "trackTemplate": {
+        "lanes": 1,
+        "segments": [
+            "straight"
+        ],
+        "lengthUnits": 14.0,
+        "tileWidth": 1.0,
+        "zones": {
+            "start": {
+                "size": {
+                    "x": 2.0,
+                    "y": 3.0
+                }
+            },
+            "end": {
+                "size": {
+                    "x": 2.0,
+                    "y": 3.0
+                }
+            }
+        },
+        "killZone": {
+            "y": -5.0,
+            "height": 2.0
+        }
+    },
+    "difficulty": {
+        "tracks": 1,
+        "playerSpeed": {
+            "start": 6.0,
+            "deltaPerTrack": 0.3499999940395355
+        },
+        "jumpForce": 9.0,
+        "gapProbability": {
+            "start": 0.019999999552965165,
+            "deltaPerTrack": 0.019999999552965165,
+            "max": 0.3499999940395355
+        },
+        "gapRules": {
+            "noAtSpawn": true,
+            "noAdjacentGaps": true,
+            "maxGapWidth": 1
+        }
+    },
+    "progression": {
+        "ordering": "rowMajor",
+        "carrier": {
+            "type": "dartboardTaxi",
+            "attachKinematic": true,
+            "moveSpeed": 7.0
+        }
+    },
+    "layers": {
+        "track": "Track",
+        "player": "Player",
+        "killZone": "KillZone"
+    },
+    "camera": {
+        "offsetX": 2.0,
+        "offsetY": 1.0,
+        "smooth": 0.15000000596046449
+    },
+    "meta": {
+        "slope": "flat",
+        "slopeDegrees": 0.0,
+        "amplitude": 1.5,
+        "wavelength": 6.0
+    }
+}
