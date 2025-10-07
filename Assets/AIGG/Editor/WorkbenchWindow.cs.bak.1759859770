@@ -8,8 +8,11 @@ using System.Reflection;
 
 namespace Aim2Pro.AIGG
 {
-    // Workbench (local-only): NL -> (NLToJson | AIGG_NLInterpreter) -> JSON
-    // Diagnostics show matched/unmatched tokens grouped by source (intents/macros/lexicon/commands).
+    /// <summary>
+    /// Workbench (local-only): NL → (NLToJson | AIGG_NLInterpreter) → JSON
+    /// Diagnostics show matched/unmatched tokens by SPEC source (intents/macros/lexicon/commands).
+    /// No OpenAI calls here per plan.
+    /// </summary>
     public class WorkbenchWindow : EditorWindow
     {
         [SerializeField] private string _prompt = "";
@@ -18,8 +21,8 @@ namespace Aim2Pro.AIGG
         [SerializeField] private string _selectedUnmatched = "";
         [SerializeField] private Vector2 _scrollPrompt, _scrollDiag, _scrollJson;
 
+        // Cached reflection
         static readonly Dictionary<(string,string,bool), MethodInfo> _miCache = new();
-        static string[] _lastUnmatched = Array.Empty<string>();
 
         [MenuItem("Window/Aim2Pro/Workbench")]
         public static void Open()
@@ -54,6 +57,7 @@ namespace Aim2Pro.AIGG
                 EditorGUILayout.LabelField(_diagnostics ?? "", EditorStyles.wordWrappedLabel);
                 EditorGUILayout.Space(4);
 
+                // Unmatched chips row
                 var unmatched = _lastUnmatched ?? Array.Empty<string>();
                 if (unmatched.Length > 0)
                 {
@@ -68,6 +72,7 @@ namespace Aim2Pro.AIGG
                     }
                 }
 
+                // Selected box
                 _selectedUnmatched = EditorGUILayout.TextField("Unmatched phrase", _selectedUnmatched ?? "");
             }
             EditorGUILayout.EndScrollView();
@@ -79,8 +84,8 @@ namespace Aim2Pro.AIGG
             EditorGUILayout.EndScrollView();
 
             EditorGUILayout.HelpBox(
-                "Flow: normalize -> NLToJson -> AIGG_NLInterpreter -> JSON.\n" +
-                "Diagnostics show which SPEC files include your tokens.\n" +
+                "Flow: normalize → NLToJson → AIGG_NLInterpreter → JSON.\n" +
+                "Diagnostics show which SPEC files (intents/macros/lexicon/commands) contain your tokens.\n" +
                 "If JSON is empty: click a chip, 'Copy skeleton intent', then paste it in Paste & Merge.",
                 MessageType.Info);
         }
@@ -90,6 +95,7 @@ namespace Aim2Pro.AIGG
         static string Normalize(string s)
         {
             s = (s ?? "").Trim();
+            // Optional shim: if you kept Local.NL.Normalize
             var shim = CallOptional<string>(null, "Aim2Pro.AIGG.Local.NL", "Normalize", new object[]{ s });
             return string.IsNullOrEmpty(shim) ? s : shim;
         }
@@ -99,7 +105,7 @@ namespace Aim2Pro.AIGG
             _diagnostics = "";
             _json = "";
 
-            var input = (_prompt ?? "").Trim();
+            var input = ( _prompt ?? "" ).Trim();
             if (string.IsNullOrEmpty(input))
             {
                 _diagnostics = "Input is empty.";
@@ -109,14 +115,14 @@ namespace Aim2Pro.AIGG
 
             var normalized = Normalize(input);
 
-            // 1) Try NLToJson.GenerateFromPrompt
+            // 1) Try NLToJson
             string json = InvokeStatic<string>("NLToJson", "GenerateFromPrompt", normalized);
 
-            // 2) Fallback: AIGG_NLInterpreter.RunToJson/Run
+            // 2) Fallback: AIGG_NLInterpreter.RunToJson / Run
             if (string.IsNullOrEmpty(json))
                 json = InvokeInstance<string>("AIGG_NLInterpreter", new[] { "RunToJson", "Run" }, normalized);
 
-            // 3) Diagnostics by source
+            // 3) Diagnostics by source file
             var tokens = Tokenize(normalized);
             var dicts = LoadSpecSetsBySource();
             var matchedBySource = new Dictionary<string, List<string>>
@@ -143,13 +149,13 @@ namespace Aim2Pro.AIGG
             _lastUnmatched = unmatched.Distinct().ToArray();
 
             _diagnostics =
-                "Normalized:\n  " + normalized + "\n\n" +
-                "Matched (by source):\n" +
-                "  intents:  "  + string.Join(", ", matchedBySource["intents"].Distinct()) + "\n" +
-                "  macros:   "  + string.Join(", ", matchedBySource["macros"].Distinct())  + "\n" +
-                "  lexicon:  "  + string.Join(", ", matchedBySource["lexicon"].Distinct())  + "\n" +
-                "  commands: "  + string.Join(", ", matchedBySource["commands"].Distinct()) + "\n\n" +
-                "Unmatched (" + _lastUnmatched.Length + "):\n  " + string.Join(", ", _lastUnmatched) + "\n\n" +
+                $"Normalized:\n  {normalized}\n\n" +
+                $"Matched (by source):\n" +
+                $"  intents:  {string.Join(\", \", matchedBySource[\"intents\"].Distinct())}\n" +
+                $"  macros:   {string.Join(\", \", matchedBySource[\"macros\"].Distinct())}\n" +
+                $"  lexicon:  {string.Join(\", \", matchedBySource[\"lexicon\"].Distinct())}\n" +
+                $"  commands: {string.Join(\", \", matchedBySource[\"commands\"].Distinct())}\n\n" +
+                $"Unmatched ({_lastUnmatched.Length}):\n  {string.Join(\", \", _lastUnmatched)}\n\n" +
                 (string.IsNullOrEmpty(json)
                     ? "No JSON produced by local parsers.\n→ Create intents/macros for unmatched phrase(s), then try again."
                     : "Local parsers produced JSON.\n→ You can Open Paste & Merge.");
@@ -162,19 +168,13 @@ namespace Aim2Pro.AIGG
         static List<string> Tokenize(string s)
         {
             var raw = s.ToLowerInvariant();
-            // keep it simple to avoid escaping issues
-            var seps = new char[] { ' ', ',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '/', '-', '+' };
+            var seps = new char[] {' ', ',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '/', '\\', '|', '-', '+'};
             return raw.Split(seps, StringSplitOptions.RemoveEmptyEntries).ToList();
         }
 
-        static bool IsNumeric(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return false;
-            for (int i = 0; i < s.Length; i++)
-                if (!char.IsDigit(s[i])) return false;
-            return true;
-        }
+        static bool IsNumeric(string s) => s.All(c => char.IsDigit(c));
 
+        // Loads token sets per SPEC source (Editor-safe via AssetDatabase; fallback to Resources)
         static Dictionary<string, HashSet<string>> LoadSpecSetsBySource()
         {
             var map = new Dictionary<string, HashSet<string>>
@@ -185,20 +185,19 @@ namespace Aim2Pro.AIGG
                 { "commands", new HashSet<string>() }
             };
 
-            AddWordsFromJson("Assets/AIGG/Spec/intents.json",  map["intents"]);
-            AddWordsFromJson("Assets/AIGG/Spec/macros.json",   map["macros"]);
-            AddWordsFromJson("Assets/AIGG/Spec/lexicon.json",  map["lexicon"]);
+            // Preferred (Editor): Assets/AIGG/Spec/*.json
+            AddWordsFromJson("Assets/AIGG/Spec/intents.json", map["intents"]);
+            AddWordsFromJson("Assets/AIGG/Spec/macros.json", map["macros"]);
+            AddWordsFromJson("Assets/AIGG/Spec/lexicon.json", map["lexicon"]);
             AddWordsFromJson("Assets/AIGG/Spec/commands.json", map["commands"]);
 
-            if (map["intents"].Count == 0 &&
-                map["macros"].Count == 0 &&
-                map["lexicon"].Count == 0 &&
-                map["commands"].Count == 0)
+            // Fallback (Runtime-like): Resources/Spec/*
+            if (map.All(kv => kv.Value.Count == 0))
             {
-                AddWordsFromResources("Spec/intents",  map["intents"]);
-                AddWordsFromResources("Spec/macros",   map["macros"]);
-                AddWordsFromResources("Spec/lexicon",  map["lexicon"]);
-                AddWordsFromResources("Spec/commands", map["commands"]);
+                AddWordsFromResources("Spec/intents",   map["intents"]);
+                AddWordsFromResources("Spec/macros",    map["macros"]);
+                AddWordsFromResources("Spec/lexicon",   map["lexicon"]);
+                AddWordsFromResources("Spec/commands",  map["commands"]);
             }
             return map;
         }
@@ -207,20 +206,20 @@ namespace Aim2Pro.AIGG
         {
             var ta = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
             if (ta == null) return;
-            var l = (ta.text ?? "").ToLowerInvariant();
-            var parts = l.Split(new[]{'"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
-                                StringSplitOptions.RemoveEmptyEntries);
-            foreach (var w in parts) set.Add(w);
+            var l = ta.text.ToLowerInvariant();
+            foreach (var w in l.Split(new[]{'\"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
+                StringSplitOptions.RemoveEmptyEntries))
+                set.Add(w);
         }
 
         static void AddWordsFromResources(string resPath, HashSet<string> set)
         {
             var ta = Resources.Load<TextAsset>(resPath);
             if (ta == null) return;
-            var l = (ta.text ?? "").ToLowerInvariant();
-            var parts = l.Split(new[]{'"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
-                                StringSplitOptions.RemoveEmptyEntries);
-            foreach (var w in parts) set.Add(w);
+            var l = ta.text.ToLowerInvariant();
+            foreach (var w in l.Split(new[]{'\"',' ', '\n', '\r', '\t', ',', ':', '{', '}', '[', ']'},
+                StringSplitOptions.RemoveEmptyEntries))
+                set.Add(w);
         }
 
         // -------------------- reflection helpers (cached) --------------------
@@ -307,34 +306,29 @@ namespace Aim2Pro.AIGG
 
             EditorGUIUtility.systemCopyBuffer = json;
             if (t != null) EditorWindow.GetWindow(t, false, "Spec Paste & Merge");
-            Debug.Log("[AIGG] Spec JSON copied to clipboard -> open Paste & Merge and paste.");
+            Debug.Log("[AIGG] Spec JSON copied to clipboard → open Paste & Merge and paste.");
         }
 
         static void CopySkeletonIntent(string phrase)
         {
             phrase = (phrase ?? "").Trim();
-            if (phrase.Length == 0)
-            {
-                Debug.LogWarning("[AIGG] Click a chip or enter an unmatched phrase first.");
-                return;
-            }
+            if (phrase.Length == 0) { Debug.LogWarning("[AIGG] Click a chip or enter an unmatched phrase first."); return; }
 
-            // build JSON without interpolated verbatim strings (avoid brace escaping issues)
-            var lines = new List<string>
-            {
-                "{",
-                "  \"intent\": \"" + phrase + "\",",
-                "  \"slots\": [],",
-                "  \"examples\": [ \"" + phrase + "\" ],",
-                "  \"commands\": [",
-                "    { \"op\": \"insertStraight\", \"length_m\": 50 }",
-                "  ]",
-                "}"
-            };
-            var skeleton = string.Join("\n", lines);
+            var skeleton =
+$@"{{
+  ""intent"": ""{phrase}"",
+  ""slots"": [],
+  ""examples"": [ ""{phrase}"" ],
+  ""commands"": [
+    {{ ""op"": ""insertStraight"", ""length_m"": 50 }}
+  ]
+}}";
             EditorGUIUtility.systemCopyBuffer = skeleton;
             Debug.Log("[AIGG] Skeleton intent copied to clipboard. Paste into Paste & Merge.");
         }
+
+        // state
+        static string[] _lastUnmatched = Array.Empty<string>();
     }
 }
 #endif
