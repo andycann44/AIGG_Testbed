@@ -37,6 +37,198 @@
           "value": "$1:float"
         }
       ]
+    },
+    {
+      "name": "set-tracks",
+      "regex": "\\b(\\d+)\\s+tracks?\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.tracks",
+          "value": "$1:int"
+        }
+      ]
+    },
+    {
+      "name": "size-by-width-flex",
+      "regex": "\\b(\\d+(?:\\.\\d+)?)\\s*m\\s*(?:x|by|×)\\s*(\\d+(?:\\.\\d+)?)\\s*m\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.trackTemplate.lengthUnits",
+          "value": "$1:float"
+        },
+        {
+          "op": "set",
+          "path": "$.trackTemplate.tileWidth",
+          "value": "$2:float"
+        }
+      ]
+    },
+    {
+      "name": "set-length",
+      "regex": "\\blength\\s+(\\d+(?:\\.\\d+)?)\\s*m\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.trackTemplate.lengthUnits",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-tile-width",
+      "regex": "\\b(width|tile\\s+width)\\s+(\\d+(?:\\.\\d+)?)\\s*m\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.trackTemplate.tileWidth",
+          "value": "$2:float"
+        }
+      ]
+    },
+    {
+      "name": "set-grid-cols",
+      "regex": "\\bgrid\\s+cols?\\s+(\\d+)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.grid.cols",
+          "value": "$1:int"
+        }
+      ]
+    },
+    {
+      "name": "set-grid-rows",
+      "regex": "\\bgrid\\s+rows?\\s+(\\d+)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.grid.rows",
+          "value": "$1:int"
+        }
+      ]
+    },
+    {
+      "name": "set-ordering-snake",
+      "regex": "\\b(snake\\s+rows?|snake)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.progression.ordering",
+          "value": "snakeRows"
+        }
+      ]
+    },
+    {
+      "name": "set-ordering-row-major",
+      "regex": "\\b(row\\s*major|rows\\s+first|left\\s*to\\s*right)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.progression.ordering",
+          "value": "rowMajor"
+        }
+      ]
+    },
+    {
+      "name": "set-ordering-col-major",
+      "regex": "\\b(col(?:umn)?\\s*major|columns?\\s+first|top\\s*to\\s*bottom)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.progression.ordering",
+          "value": "colMajor"
+        }
+      ]
+    },
+    {
+      "name": "set-player-speed-start",
+      "regex": "\\bplayer\\s+speed\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.playerSpeed.start",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-player-speed-delta",
+      "regex": "\\bspeed\\s+delta\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.playerSpeed.deltaPerTrack",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-gap-prob-start",
+      "regex": "\\bgap\\s+prob(ability)?\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.gapProbability.start",
+          "value": "$2:float"
+        }
+      ]
+    },
+    {
+      "name": "set-gap-prob-delta",
+      "regex": "\\bgap\\s+delta\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.gapProbability.deltaPerTrack",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-gap-prob-max",
+      "regex": "\\bgap\\s+max\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.difficulty.gapProbability.max",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-camera-x",
+      "regex": "\\bcamera\\s+x\\s+(-?\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.camera.offsetX",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-camera-y",
+      "regex": "\\bcamera\\s+y\\s+(-?\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.camera.offsetY",
+          "value": "$1:float"
+        }
+      ]
+    },
+    {
+      "name": "set-camera-smooth",
+      "regex": "\\bcamera\\s+smooth(ing)?\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.camera.smooth",
+          "value": "$2:float"
+        }
+      ]
     }
   ]
 }

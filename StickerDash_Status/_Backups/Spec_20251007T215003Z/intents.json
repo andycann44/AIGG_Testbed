@@ -1,0 +1,42 @@
+﻿{
+  "intents": [
+    {
+      "name": "set-type-track",
+      "regex": "\\btrack\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.type",
+          "value": "track"
+        }
+      ]
+    },
+    {
+      "name": "set-length-width",
+      "regex": "\\b(\\d+)\\s*(?:m|meters?)\\s*by\\s*(\\d+)\\s*(?:m|meters?)\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.track.length_m",
+          "value": "$1:int"
+        },
+        {
+          "op": "set",
+          "path": "$.track.width_m",
+          "value": "$2:int"
+        }
+      ]
+    },
+    {
+      "name": "set-missing-tiles-percent",
+      "regex": "\\b(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:tiles?\\s*)?missing\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.random_holes.percent",
+          "value": "$1:float"
+        }
+      ]
+    }
+  ]
+}

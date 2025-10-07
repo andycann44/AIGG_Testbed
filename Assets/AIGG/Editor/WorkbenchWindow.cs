@@ -46,9 +46,9 @@ namespace Aim2Pro.AIGG
                     CopySkeletonIntent(_selectedUnmatched);
             }
 
-            EditorGUILayout.Space(8);
+            EditorGUILayout.Space(15);
             GUILayout.Label("Diagnostics (normalized, matched by source, unmatched chips)", EditorStyles.boldLabel);
-            _scrollDiag = EditorGUILayout.BeginScrollView(_scrollDiag, GUILayout.MinHeight(160));
+            _scrollDiag = EditorGUILayout.BeginScrollView(_scrollDiag, GUILayout.MinHeight(250));
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField(_diagnostics ?? "", EditorStyles.wordWrappedLabel);
