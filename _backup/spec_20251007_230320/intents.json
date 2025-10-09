@@ -1,0 +1,41 @@
+{
+  "intents": [
+    {
+      "name": "set-size-length-by-width",
+      "regex": "\\b(\\d+(?:\\.\\d+)?)\\s*m\\s*(?:x|by|\u00d7)\\s*(\\d+(?:\\.\\d+)?)\\s*m\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.trackTemplate.lengthUnits",
+          "value": "$1:float"
+        },
+        {
+          "op": "set",
+          "path": "$.trackTemplate.tileWidth",
+          "value": "$2:float"
+        }
+      ]
+    },
+    {
+      "name": "rebuild-length-by-width",
+      "regex": "\\brebuild\\s+(\\d+(?:\\.\\d+)?)\\s*m?\\s*(?:x|by|\u00d7)\\s*(\\d+(?:\\.\\d+)?)\\s*m?\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.trackTemplate.lengthUnits",
+          "value": "$1:float"
+        },
+        {
+          "op": "set",
+          "path": "$.trackTemplate.tileWidth",
+          "value": "$2:float"
+        },
+        {
+          "op": "set",
+          "path": "$.meta.rebuild",
+          "value": "true:bool"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "commands": [
+    { "name":"curve-range",
+      "regex":"\\bcurve\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\s+(left|right)\\s+(\\d+(?:\\.\\d+)?)\\s*deg\\b",
+      "kernel":[{"op":"CurveRows","args":{"start":"$1:int","end":"$2:int","side":"$3","deg":"$4:float"}}] },
+
+    { "name":"straighten-range",
+      "regex":"\\bstraighten\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\b",
+      "kernel":[{"op":"StraightenRows","args":{"start":"$1:int","end":"$2:int"}}] },
+
+    { "name":"straighten-single",
+      "regex":"\\bstraighten\\s+row\\s+(\\d+)\\b",
+      "kernel":[{"op":"StraightenRows","args":{"start":"$1:int","end":"$1:int"}}] },
+
+    { "name":"delete-row",
+      "regex":"\\bdelete\\s+row\\s+(\\d+)\\b",
+      "kernel":[{"op":"DeleteRow","args":{"row":"$1:int"}}] },
+
+    { "name":"delete-rows-range",
+      "regex":"\\bdelete\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\b",
+      "kernel":[{"op":"DeleteRowsRange","args":{"start":"$1:int","end":"$2:int"}}] },
+
+    { "name":"delete-tiles-in-row",
+      "regex":"\\bdelete\\s+tiles?\\s+([0-9,\\s]+)\\s+in\\s+row\\s+(\\d+)\\b",
+      "kernel":[{"op":"DeleteTilesInRow","args":{"row":"$2:int","tiles":"$1:int_list"}}] },
+
+    { "name":"delete-tiles-in-rows",
+      "regex":"\\bdelete\\s+tiles?\\s+([0-9,\\s]+)\\s+in\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\b",
+      "kernel":[{"op":"DeleteTilesInRows","args":{"start":"$2:int","end":"$3:int","tiles":"$1:int_list"}}] },
+
+    { "name":"offset-x-range",
+      "regex":"\\boffset\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\s+x\\s+(-?\\d+(?:\\.\\d+)?)m\\b",
+      "kernel":[{"op":"OffsetRowsX","args":{"start":"$1:int","end":"$2:int","meters":"$3:float"}}] },
+
+    { "name":"offset-y-range",
+      "regex":"\\boffset\\s+rows?\\s+(\\d+)\\s*-\\s*(\\d+)\\s+y\\s+(-?\\d+(?:\\.\\d+)?)m\\b",
+      "kernel":[{"op":"OffsetRowsY","args":{"start":"$1:int","end":"$2:int","meters":"$3:float"}}] },
+
+    { "name":"set-width",
+      "regex":"\\bset\\s+width\\s+to\\s+(\\d+(?:\\.\\d+)?)m\\b",
+      "kernel":[{"op":"SetWidth","args":{"width":"$1:float"}}] },
+
+    { "name":"set-thickness",
+      "regex":"\\bset\\s+thickness\\s+to\\s+(\\d+(?:\\.\\d+)?)m\\b",
+      "kernel":[{"op":"SetThickness","args":{"thickness":"$1:float"}}] },
+
+    { "name":"append-straight",
+      "regex":"\\bappend\\s+straight\\s+(\\d+(?:\\.\\d+)?)m(?:\\s+step\\s+(\\d+(?:\\.\\d+)?))?\\b",
+      "kernel":[{"op":"AppendStraight","args":{"distance":"$1:float","step":"$2:float"}}] },
+
+    { "name":"append-arc",
+      "regex":"\\bappend\\s+arc\\s+(left|right)\\s+(\\d+(?:\\.\\d+)?)\\s*deg(?:\\s+len\\s+(\\d+(?:\\.\\d+)?))?(?:\\s+steps\\s+(\\d+))?\\b",
+      "kernel":[{"op":"AppendArc","args":{"side":"$1","deg":"$2:float","arcLen":"$3:float","steps":"$4:int"}}] },
+
+    { "name":"resample",
+      "regex":"\\bresample\\s+density\\s+(\\d+(?:\\.\\d+)?)\\b",
+      "kernel":[{"op":"Resample","args":{"density":"$1:float"}}] }
+  ]
+}

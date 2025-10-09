@@ -1,0 +1,34 @@
+﻿{
+  "files": [
+    {
+      "name": "commands",
+      "path": "Assets/AIGG/Spec/commands.json",
+      "root": "$.commands",
+      "key": "name"
+    },
+    {
+      "name": "intents",
+      "path": "Assets/AIGG/Spec/intents.json",
+      "root": "$.intents",
+      "key": "name"
+    },
+    {
+      "name": "macros",
+      "path": "Assets/AIGG/Spec/macros.json",
+      "root": "$.macros",
+      "key": "name"
+    },
+    {
+      "name": "lexicon",
+      "path": "Assets/AIGG/Spec/lexicon.json",
+      "root": "$",
+      "key": null
+    },
+    {
+      "name": "fieldmap",
+      "path": "Assets/AIGG/Spec/fieldmap.json",
+      "root": "$",
+      "key": null
+    }
+  ]
+}

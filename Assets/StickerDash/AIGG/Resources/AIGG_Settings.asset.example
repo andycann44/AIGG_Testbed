@@ -1,0 +1,6 @@
+# Copy this to: Assets/StickerDash/AIGG/Resources/AIGG_Settings.asset
+# and fill in your local keys. Do NOT commit the real file.
+
+m_OpenAIApiKey: ""
+m_Model: "gpt-4o-mini"   # or whatever you use
+m_Enabled: true

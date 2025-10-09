@@ -1,0 +1,14 @@
+{
+  "nl": "build 40m by 3m, curve rows 10-20 left 15deg",
+  "normalized": "build 40 m by 3 m, curve rows 10-20 left 15 deg",
+  "exec": [
+    { "op": "set", "path": "$.trackTemplate.lengthUnits", "value": 40 },
+    { "op": "set", "path": "$.trackTemplate.tileWidth", "value": 3 },
+    { "op": "CurveRows", "args": { "start": 10, "end": 20, "side": "left", "deg": 15 } }
+  ],
+  "matched": [
+    "[intents] set-size-length-by-width",
+    "[commands] curve-range"
+  ],
+  "unmatched": []
+}

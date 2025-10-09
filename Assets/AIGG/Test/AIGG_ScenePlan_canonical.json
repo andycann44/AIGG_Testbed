@@ -1,0 +1,20 @@
+{
+  "name": "Test Track Canonical",
+  "grid": { "cols": 3, "rows": 5, "dx": 30, "dy": 18, "origin": { "x": 0, "y": 0 } },
+  "trackTemplate": {
+    "lanes": 1, "tileWidth": 3, "lengthUnits": 40,
+    "segments": ["straight", "straight", "straight"],
+    "zones": { "start": { "size": { "x": 2, "y": 3 } }, "end": { "size": { "x": 2, "y": 3 } } },
+    "killZone": { "y": -5, "height": 2 }
+  },
+  "difficulty": {
+    "tracks": 3,
+    "playerSpeed": { "start": 5.0, "deltaPerTrack": 0.35 },
+    "gapProbability": { "start": 0.02, "deltaPerTrack": 0.02, "max": 0.35 },
+    "gapRules": { "maxGapWidth": 1, "noAdjacentGaps": true, "noAtSpawn": true },
+    "jumpForce": 9.0
+  },
+  "progression": { "ordering": "snakeRows", "carrier": { "type": "dartboardTaxi", "attachKinematic": true, "moveSpeed": 5.0 } },
+  "layers": { "track": "Track", "player": "Player", "killZone": "KillZone" },
+  "camera": { "offsetX": 2, "offsetY": 1, "smooth": 0.15 }
+}
