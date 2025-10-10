@@ -10,70 +10,90 @@ using System.Globalization;
 
 namespace Aim2Pro.AIGG.Workbench {
   public class WorkbenchWindow : EditorWindow {
+
+    // ====== Config ======
     static readonly string SpecDir = "Assets/AIGG/Spec";
     static readonly string[] SpecFiles = { "intents","macros","lexicon","commands","fieldmap","registry","schema" };
-
     static readonly string[] BlocklistedParsers = { "AutoScene", "DefaultScene", "ScenePlanSkeleton" };
 
     static readonly HashSet<string> IgnorableTokens = new HashSet<string> {
       "m","meter","meters","by","x","wide","every","tile","tiles",
       "killzone","kill","zone","spike","spikes","ramp","gap","gaps","hazard",
-      "missing","miss","holes","hole",
+      "missing","miss","holes","hole","random","randomly",
       "the","a","an","of","in","on","at","to","for","and","or","with","per","long",
-      "make","build","create","random","randomly"
+      "make","build","create","over","across"
     };
 
+    enum SelfFixMode { Off = 0, Local = 1, AI = 2, Hybrid = 3 }
+    const string SelfFixPrefKey = "AIGG_Workbench_SelfFixMode";
+
+    // ====== State ======
     string _nl   = "100m by 10 m";
     string _diag = "Spec: " + SpecDir;
     string _json = "";
     Vector2 _diagScroll = Vector2.zero;
+    SelfFixMode _selfFix;
 
     [MenuItem("Window/Aim2Pro/Workbench", false, 100)]
     public static void ShowWindow() {
       var w = GetWindow<WorkbenchWindow>();
       w.titleContent = new GUIContent("Workbench");
-      w.minSize = new Vector2(680, 520);
+      w.minSize = new Vector2(700, 540);
       w.Show();
     }
 
+    void OnEnable() {
+      _selfFix = (SelfFixMode)EditorPrefs.GetInt(SelfFixPrefKey, (int)SelfFixMode.Hybrid);
+    }
+
     void OnGUI() {
+      // Header row with self-fix selector
+      using (new EditorGUILayout.HorizontalScope()) {
+        EditorGUILayout.LabelField("Workbench", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        var newMode = (SelfFixMode)EditorGUILayout.EnumPopup(new GUIContent("Self-Fix"), _selfFix, GUILayout.Width(220));
+        if (newMode != _selfFix) { _selfFix = newMode; EditorPrefs.SetInt(SelfFixPrefKey, (int)_selfFix); }
+      }
+
+      EditorGUILayout.Space(6);
       EditorGUILayout.LabelField("Natural language prompt", EditorStyles.boldLabel);
       _nl = EditorGUILayout.TextArea(_nl, GUILayout.MinHeight(70));
 
       EditorGUILayout.Space(4);
       using (new EditorGUILayout.HorizontalScope()) {
         if (GUILayout.Button("Parse NL (local intents)", GUILayout.Height(24))) ParseLocal();
-        if (GUILayout.Button("Open Paste & Merge",      GUILayout.Height(24))) OpenPasteAndMerge();
+        if (GUILayout.Button("Open Paste & Merge",      GUILayout.Height(24))) OpenPasteAndMergeWith(_json);
         if (GUILayout.Button("Copy skeleton intent",    GUILayout.Height(24))) CopySkeletonIntent();
       }
 
       EditorGUILayout.Space(8);
       EditorGUILayout.LabelField("Diagnostics", EditorStyles.boldLabel);
-      _diagScroll = EditorGUILayout.BeginScrollView(_diagScroll, GUILayout.Height(140));
+      _diagScroll = EditorGUILayout.BeginScrollView(_diagScroll, GUILayout.Height(160));
       using (new EditorGUI.DisabledScope(true)) {
         EditorGUILayout.TextArea(_diag, GUI.skin.textArea, GUILayout.ExpandHeight(false));
       }
       EditorGUILayout.EndScrollView();
 
-      EditorGUILayout.Space(4);
+      EditorGUILayout.Space(6);
       EditorGUILayout.LabelField("JSON Output", EditorStyles.boldLabel);
       _json = EditorGUILayout.TextArea(_json, GUILayout.MinHeight(220));
 
-      EditorGUILayout.Space(4);
+      EditorGUILayout.Space(6);
       using (new EditorGUILayout.HorizontalScope()) {
         EditorGUILayout.LabelField("Spec: " + SpecDir, EditorStyles.miniLabel);
         if (GUILayout.Button("Open Spec Folder", GUILayout.Width(160))) EditorUtility.RevealInFinder(SpecDir);
-        if (GUILayout.Button("Reset to scenePlan skeleton", GUILayout.Width(220))) _json = BuildScenePlanSkeleton(); // only on demand
+        if (GUILayout.Button("Reset to scenePlan skeleton", GUILayout.Width(220))) _json = BuildScenePlanSkeleton(); // manual only
       }
 
       EditorGUILayout.HelpBox(
-        "Both tools read 7 Spec files in Assets/AIGG/Spec. If parsing fails, returns a scenePlan, OR leaves unmatched tokens, output stays EMPTY.",
+        "Reads the 7 Spec files in Assets/AIGG/Spec. If parsing fails, returns a scenePlan, or leaves unmatched tokens, output stays EMPTY. " +
+        "Self-Fix can propose patches for those 7 files (Local / AI / Hybrid).",
         MessageType.Info);
     }
 
     void ParseLocal() {
       try {
-        _json = ""; // always clear first
+        _json = ""; // rule: always clear first
 
         string normalized = Normalize(_nl);
         var sets        = LoadSpecSets();
@@ -83,9 +103,9 @@ namespace Aim2Pro.AIGG.Workbench {
         var ignored     = unmatchedRaw.Where(IsIgnorableToken).Distinct().ToArray();
         var unmatched   = unmatchedRaw.Where(t => !IsIgnorableToken(t)).Distinct().ToArray();
 
-        string extraNote = "";
+        bool suppressedFallback = false;
 
-        // A) Local minimal parser (dimensions + optional missing% + gaps%)
+        // A) Minimal built-in for quick verification (dimensions + missing/gap %)
         var canonical = TryConvertNLToCanonical(_nl);
         if (!string.IsNullOrEmpty(canonical)) {
           _json = canonical;
@@ -95,7 +115,9 @@ namespace Aim2Pro.AIGG.Workbench {
           var json = TryRunLocalParsers(_nl);
           if (!string.IsNullOrEmpty(json)) {
             if (LooksLikeFallback(json)) {
+              suppressedFallback = true;
               ShowNotification(new GUIContent("scenePlan suppressed → EMPTY"));
+              _json = "";
             } else {
               _json = json;
               ShowNotification(new GUIContent("Parsed OK"));
@@ -105,18 +127,12 @@ namespace Aim2Pro.AIGG.Workbench {
           }
         }
 
-        // HARD RULE: if any meaningful unmatched tokens remain, clear output and prepare a Lexicon patch.
-        if (!string.IsNullOrEmpty(_json) && unmatched.Length > 0) {
-          var patch = BuildLexiconPatch(unmatched);
-          EditorGUIUtility.systemCopyBuffer = patch;
-          extraNote = "Output cleared: unmatched tokens → " + string.Join(", ", unmatched) +
-                      ". Lexicon patch copied to clipboard. Open Paste & Merge to apply.";
-          _json = "";
-          OpenPasteAndMerge();
-          ShowNotification(new GUIContent("Unmatched → EMPTY (patch copied)"));
+        // If output is empty (suppressed) OR there are unmatched tokens → Self-Fix
+        if (_selfFix != SelfFixMode.Off && (string.IsNullOrEmpty(_json) || unmatched.Length > 0)) {
+          TrySelfFix(_nl, unmatched, suppressedFallback);
         }
 
-        // Diagnostics
+        // Diagnostics build
         var sb = new StringBuilder();
         sb.AppendLine("Normalized:");
         sb.AppendLine("  " + normalized);
@@ -133,10 +149,6 @@ namespace Aim2Pro.AIGG.Workbench {
           sb.AppendLine("Ignored tokens (" + ignored.Length + "):");
           foreach (var u in ignored) sb.AppendLine("  - " + u);
         }
-        if (!string.IsNullOrEmpty(extraNote)) {
-          sb.AppendLine();
-          sb.AppendLine(extraNote);
-        }
         _diag = sb.ToString();
 
       } catch (Exception ex) {
@@ -146,9 +158,222 @@ namespace Aim2Pro.AIGG.Workbench {
       }
     }
 
-    // === helpers ===
+    // ====== Self-Fix orchestrator ======
+    void TrySelfFix(string nl, string[] unmatched, bool suppressedFallback) {
+      // Build a target-specific suggestion: for your current case, we focus on an Intents patch.
+      string localPatch = BuildLocalIntentsPatch(nl);
+
+      string finalPatch = null;
+      string modeUsed = "";
+
+      if (_selfFix == SelfFixMode.Local) {
+        finalPatch = localPatch;
+        modeUsed = "Local";
+      } else if (_selfFix == SelfFixMode.AI) {
+        finalPatch = TryAIIntentsPatch(nl, localFallback: localPatch, out modeUsed);
+      } else { // Hybrid
+        finalPatch = TryAIIntentsPatch(nl, localFallback: localPatch, out modeUsed);
+      }
+
+      if (string.IsNullOrEmpty(finalPatch)) {
+        ShowNotification(new GUIContent("Self-Fix failed → review Diagnostics"));
+        return;
+      }
+
+      // Keep JSON output EMPTY (until you apply spec changes and reparse)
+      EditorGUIUtility.systemCopyBuffer = finalPatch;
+      OpenPasteAndMergeWith(finalPatch);
+      ShowNotification(new GUIContent($"Self-Fix ({modeUsed}) → Patch copied & opened"));
+    }
+
+    // Local intents patch (minimal, spec-driven; uses direct JSON paths via ops)
+    static string BuildLocalIntentsPatch(string nl) {
+      var s = (nl ?? "").ToLowerInvariant();
+
+      // Detect common pattern: left/right curve over N rows
+      string curveIntent = "";
+      var cv = Regex.Match(s, @"\b(left|right)\s+(?:curve|arc)\s+(?:over|across)\s+(\d+)\s+rows?\b");
+      if (cv.Success) {
+        curveIntent =
+@"{
+  ""name"": ""curve-over-rows"",
+  ""regex"": ""\\b(left|right)\\s+(?:curve|arc)\\s+(?:over|across)\\s+(\\d+)\\s+rows?\\b"",
+  ""ops"": [
+    {""op"":""set"",""path"":""$.curve.side"",""value"":""$1""},
+    {""op"":""set"",""path"":""$.curve.rows"",""value"":""$2:int""}
+  ]
+}";
+      }
+
+      // If nothing specific matched, still propose a neutral skeleton for any unmatched words:
+      if (string.IsNullOrEmpty(curveIntent)) {
+        return
+@"{
+  ""intents"": [
+    {
+      ""name"": ""autofix-skeleton"",
+      ""regex"": ""\\b(.+)\\b"",
+      ""ops"": [
+        {""op"":""custom"",""path"":""$.__notes"",""value"":""autofix: bind fields then refine""}
+      ]
+    }
+  ]
+}";
+      }
+
+      // Wrap as intents JSON
+      var sb = new StringBuilder();
+      sb.Append("{\n  \"intents\": [\n");
+      sb.Append(curveIntent);
+      sb.Append("\n  ]\n}\n");
+      return sb.ToString();
+    }
+
+    // Optional AI patch (reflection; falls back to local if unavailable)
+    static string TryAIIntentsPatch(string nl, string localFallback, out string modeUsed) {
+      modeUsed = "AI";
+      try {
+        // Find a helper we can call without compile-time refs
+        var settingsType = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "AIGGSettings");
+        var helperType = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "ApiSettingsHelper");
+
+        if (settingsType == null || helperType == null) {
+          modeUsed = "Local (AI unavailable)";
+          return localFallback;
+        }
+
+        var loadOrCreate = settingsType.GetMethod("LoadOrCreate", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
+        var inst = loadOrCreate?.Invoke(null, null);
+        if (inst == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        var modeProp = settingsType.GetField("mode");
+        var keyField = settingsType.GetField("openAIKey");
+        var betaField = settingsType.GetField("useResponsesBeta");
+        if (modeProp == null || keyField == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        var modeVal = (modeProp.GetValue(inst)?.ToString() ?? "").ToUpperInvariant();
+        var keyVal = keyField.GetValue(inst) as string ?? "";
+        var useBeta = betaField != null && (bool)betaField.GetValue(inst);
+
+        if (modeVal != "OPENAI" || string.IsNullOrEmpty(keyVal)) {
+          modeUsed = "Local (AI not configured)";
+          return localFallback;
+        }
+
+        var call = helperType.GetMethod("CallOpenAI",
+          System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
+        if (call == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        // Prompt instructs AI to return ONLY intents JSON
+        var prompt =
+@"You are editing a game NL spec. The user prompt is:
+
+" + nl + @"
+
+Return ONLY a valid JSON object with a single top-level key ""intents"" (array).
+Each intent must include: name, regex, ops. Use JSONPath in ""path"" for writes.
+Example op: {""op"":""set"",""path"":""$.curve.rows"",""value"":""$1:int""}.
+Do not include explanations.";
+
+        string result = null;
+        string error = null;
+
+        // CallOpenAI(prompt, onSuccess(string), onError(string), useResponsesBeta)
+        call.Invoke(null, new object[] {
+          prompt,
+          (Action<string>)(resp => { result = resp; }),
+          (Action<string>)(err  => { error = err; }),
+          useBeta
+        });
+
+        // If plugin runs async, we won't get resp immediately; fall back
+        if (string.IsNullOrEmpty(result)) {
+          modeUsed = "Local (AI async/unavailable)";
+          return localFallback;
+        }
+
+        // Basic sanity check
+        var s = result.TrimStart();
+        if (!(s.StartsWith("{") || s.StartsWith("["))) {
+          modeUsed = "Local (AI malformed)";
+          return localFallback;
+        }
+
+        modeUsed = "AI";
+        return result;
+      } catch {
+        modeUsed = "Local (AI error)";
+        return localFallback;
+      }
+    }
+
+    // Open Paste & Merge with provided text (without touching _json)
+    void OpenPasteAndMergeWith(string content) {
+      try {
+        var spmw = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "SpecPasteMergeWindow" || t.FullName?.EndsWith(".SpecPasteMergeWindow") == true);
+        if (spmw != null) {
+          var m = spmw.GetMethod("OpenWithJson",
+            System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|
+            System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Instance,
+            null, new Type[]{ typeof(string) }, null);
+          if (m != null) {
+            object inst = m.IsStatic ? null : EditorWindow.GetWindow(spmw);
+            m.Invoke(inst, new object[]{ content ?? "" });
+            return;
+          }
+          // fallback: open window + copy
+          EditorWindow.GetWindow(spmw).Show();
+        }
+        // ensure clipboard has it
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        // try menus too
+        if (!(EditorApplication.ExecuteMenuItem("Window/Aim2Pro/Paste & Merge")
+              || EditorApplication.ExecuteMenuItem("Window/Paste & Merge")
+              || EditorApplication.ExecuteMenuItem("Tools/Paste & Merge"))) {
+          ShowNotification(new GUIContent("Paste & Merge not found (copied to clipboard)."));
+        }
+      } catch {
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        ShowNotification(new GUIContent("Error opening Paste & Merge (copied)."));
+      }
+    }
+
+    // ====== Diagnostics helpers ======
     static string J(Dictionary<string,List<string>> m, string k) =>
       string.Join(", ", (m != null && m.ContainsKey(k) ? m[k] : new List<string>()).Distinct());
+
+    // Quick local canonical (kept from earlier) — only for basic dims/missing/gap
+    static string TryConvertNLToCanonical(string nl) {
+      if (string.IsNullOrWhiteSpace(nl)) return null;
+      var s = nl.ToLowerInvariant();
+
+      var dim = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*m\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)\s*m");
+      if (!dim.Success) return null;
+      float length = float.Parse(dim.Groups[1].Value, CultureInfo.InvariantCulture);
+      float width  = float.Parse(dim.Groups[2].Value, CultureInfo.InvariantCulture);
+
+      float? missingChance = null;
+      float? gapChance = null;
+
+      var miss1 = Regex.Match(s, @"(?:random(?:ly)?\s+)?(?:tiles?\s+missing|missing\s+tiles)(?:\s*(?:at|of|about|around)?\s*(\d+(?:\.\d+)?)\s*%)?");
+      if (miss1.Success)
+        missingChance = miss1.Groups[1].Success ? Math.Max(0f, Math.Min(1f, float.Parse(miss1.Groups[1].Value, CultureInfo.InvariantCulture)/100f)) : 0.15f;
+      var miss2 = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:tiles?\s+missing|missing\s+tiles)");
+      if (miss2.Success)
+        missingChance = Math.Max(0f, Math.Min(1f, float.Parse(miss2.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
+
+      var gaps = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:gaps?|gap\s*(?:chance|prob(?:ability)?))");
+      if (gaps.Success)
+        gapChance = Math.Max(0f, Math.Min(1f, float.Parse(gaps.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
+
+      return BuildSimpleTrackJson(length, width, missingChance, gapChance);
+    }
 
     static string BuildSimpleTrackJson(float length, float width, float? missingChance = null, float? gapChance = null) {
       var sb = new StringBuilder();
@@ -164,39 +389,6 @@ namespace Aim2Pro.AIGG.Workbench {
       sb.Append("    \"killzoneY\": -5\n");
       sb.Append("  }\n}");
       return sb.ToString();
-    }
-
-    static string TryConvertNLToCanonical(string nl) {
-      if (string.IsNullOrWhiteSpace(nl)) return null;
-      var s = nl.ToLowerInvariant();
-
-      // Dimensions anywhere in the text
-      var dim = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*m\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)\s*m");
-      if (!dim.Success) return null;
-      float length = float.Parse(dim.Groups[1].Value, CultureInfo.InvariantCulture);
-      float width  = float.Parse(dim.Groups[2].Value, CultureInfo.InvariantCulture);
-
-      float? missingChance = null;
-      float? gapChance = null;
-
-      // Missing tiles (with optional %)
-      var miss1 = Regex.Match(s,
-        @"(?:random(?:ly)?\s+)?(?:tiles?\s+missing|missing\s+tiles)(?:\s*(?:at|of|about|around)?\s*(\d+(?:\.\d+)?)\s*%)?");
-      if (miss1.Success) {
-        missingChance = miss1.Groups[1].Success
-          ? Math.Max(0f, Math.Min(1f, float.Parse(miss1.Groups[1].Value, CultureInfo.InvariantCulture)/100f))
-          : 0.15f;
-      }
-      var miss2 = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:tiles?\s+missing|missing\s+tiles)");
-      if (miss2.Success)
-        missingChance = Math.Max(0f, Math.Min(1f, float.Parse(miss2.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
-
-      // Gaps %
-      var gaps = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:gaps?|gap\s*(?:chance|prob(?:ability)?))");
-      if (gaps.Success)
-        gapChance = Math.Max(0f, Math.Min(1f, float.Parse(gaps.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
-
-      return BuildSimpleTrackJson(length, width, missingChance, gapChance);
     }
 
     static bool LooksLikeFallback(string s) {
@@ -260,12 +452,7 @@ namespace Aim2Pro.AIGG.Workbench {
       return null;
     }
 
-    static string BuildLexiconPatch(string[] tokens) {
-      var sb = new StringBuilder();
-      foreach (var t in tokens.Distinct()) sb.AppendLine($"{t} => {t}");
-      return sb.ToString();
-    }
-
+    // Spec scans for Diagnostics
     static Dictionary<string, HashSet<string>> LoadSpecSets() {
       var map = new Dictionary<string, HashSet<string>>();
       foreach (var n in SpecFiles) map[n] = new HashSet<string>();
@@ -288,13 +475,8 @@ namespace Aim2Pro.AIGG.Workbench {
       foreach (var t in toks) foreach (var kv in sets) if (kv.Value.Contains(t)) outMap[kv.Key].Add(t);
       return outMap;
     }
-    static bool IsIgnorableToken(string t) {
-      if (string.IsNullOrEmpty(t)) return true;
-      if (IgnorableTokens.Contains(t)) return true;
-      if (Regex.IsMatch(t, @"^\d+(?:\.\d+)?$")) return true;
-      return false;
-    }
 
+    // Manual reset skeleton (never auto-used)
     static string BuildScenePlanSkeleton() {
       var sb = new StringBuilder();
       sb.Append("{\n  \"scenePlan\": {\n");
@@ -305,14 +487,14 @@ namespace Aim2Pro.AIGG.Workbench {
       sb.Append("    \"difficulty\": {\"tracks\":3,\"playerSpeed\":{\"start\":5.0,\"deltaPerTrack\":0.35},\"jumpForce\":9.0,\n");
       sb.Append("      \"gapProbability\":{\"start\":0.02,\"deltaPerTrack\":0.02,\"max\":0.35},\n");
       sb.Append("      \"gapRules\":{\"noAtSpawn\":true,\"noAdjacentGaps\":true,\"maxGapWidth\":1}},\n");
-      sb.Append("    \"progression\": {\"ordering\":\"snakeRows\",\"carrier\":{\"type\":\"dartboardTaxi\",\"attachKinematic\":true,\"moveSpeed\":5.0}},\n");
+      sb.Append("    \"progression\": {\"ordering\":\"snakeRows\",\"carrier\":{\"type\":\"dartboardTaxi\",\"attachKinematic\":true,\"moveSpeed\":5.0}},\");
       sb.Append("    \"layers\": {\"track\":\"Track\",\"player\":\"Player\",\"killZone\":\"KillZone\"},\n");
       sb.Append("    \"camera\": {\"offsetX\":2.0,\"offsetY\":1.0,\"smooth\":0.15}\n");
       sb.Append("  }\n}\n");
       return sb.ToString();
     }
 
-    void OpenPasteAndMerge() {
+    void OpenPasteAndMergeWith(string content) {
       try {
         var spmw = AppDomain.CurrentDomain.GetAssemblies()
           .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
@@ -324,37 +506,16 @@ namespace Aim2Pro.AIGG.Workbench {
             null, new Type[]{ typeof(string) }, null);
           if (m != null) {
             object inst = m.IsStatic ? null : EditorWindow.GetWindow(spmw);
-            m.Invoke(inst, new object[]{ _json ?? "" });
-            ShowNotification(new GUIContent("Sent to Paste & Merge"));
+            m.Invoke(inst, new object[]{ content ?? "" });
             return;
           }
           EditorWindow.GetWindow(spmw).Show();
-          if (!string.IsNullOrEmpty(_json)) EditorGUIUtility.systemCopyBuffer = _json;
-          ShowNotification(new GUIContent("Opened (JSON copied)"));
-          return;
         }
-
-        bool opened =
-          EditorApplication.ExecuteMenuItem("Window/Aim2Pro/Paste & Merge") ||
-          EditorApplication.ExecuteMenuItem("Window/Paste & Merge") ||
-          EditorApplication.ExecuteMenuItem("Tools/Paste & Merge");
-        if (!string.IsNullOrEmpty(_json)) EditorGUIUtility.systemCopyBuffer = _json;
-        ShowNotification(new GUIContent(opened ? "Opened via menu (JSON copied)" : "Window not found; JSON copied"));
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        EditorApplication.ExecuteMenuItem("Window/Aim2Pro/Paste & Merge");
       } catch {
-        if (!string.IsNullOrEmpty(_json)) EditorGUIUtility.systemCopyBuffer = _json;
-        ShowNotification(new GUIContent("Error; JSON copied"));
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
       }
-    }
-
-    void CopySkeletonIntent() {
-      var s = "{\n  \"intents\": [\n    {\n      \"name\": \"dimensions-by-m\",\n" +
-              "      \"regex\": \"^\\\\s*(?:make|build|create)?\\\\s*(\\\\d+(?:\\\\.\\\\d+)?)\\\\s*m\\\\s*(?:x|by|\\\\u00d7)\\\\s*(\\\\d+(?:\\\\.\\\\d+)?)\\\\s*m\\\\s*$\",\n" +
-              "      \"ops\": [\n" +
-              "        {\"op\":\"set\",\"path\":\"$.trackTemplate.lengthUnits\",\"value\":\"$1:float\"},\n" +
-              "        {\"op\":\"set\",\"path\":\"$.trackTemplate.tileWidth\",\"value\":\"$2:float\"}\n" +
-              "      ]\n    }\n  ]\n}\n";
-      EditorGUIUtility.systemCopyBuffer = s;
-      ShowNotification(new GUIContent("Skeleton intent copied (Target: Intents)."));
     }
   }
 }

@@ -1,0 +1,527 @@
+// Assets/AIGG/Editor/Workbench/WorkbenchWindow.cs
+using UnityEditor;
+using UnityEngine;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Globalization;
+
+namespace Aim2Pro.AIGG.Workbench {
+  public class WorkbenchWindow : EditorWindow {
+    private static readonly string AIGG_HELP = @"AIGG Workbench
+— Parse NL (local): NLToJson.GenerateFromPrompt() then AIGG_NLInterpreter.RunToJson() fallback.
+— Open Paste & Merge: routes JSON into SpecPasteMergeWindow.
+— Copy skeleton intent: scaffolds an intent for unmatched phrases.
+Tip: click Unmatched chips to copy patterns.@";
+
+
+    // ====== Config ======
+    static readonly string SpecDir = "Assets/AIGG/Spec@";
+    static readonly string[] SpecFiles = { "intents","macros","lexicon","commands","fieldmap","registry","schema@" };
+    static readonly string[] BlocklistedParsers = { "AutoScene", "DefaultScene", "ScenePlanSkeleton@" };
+
+    static readonly HashSet<string> IgnorableTokens = new HashSet<string> {
+      "m","meter","meters","by","x","wide","every","tile","tiles@",
+      "killzone","kill","zone","spike","spikes","ramp","gap","gaps","hazard@",
+      "missing","miss","holes","hole","random","randomly@",
+      "the","a","an","of","in","on","at","to","for","and","or","with","per","long@",
+      "make","build","create","over","across@"
+    };
+
+    enum SelfFixMode { Off = 0, Local = 1, AI = 2, Hybrid = 3 }
+    const string SelfFixPrefKey = "AIGG_Workbench_SelfFixMode@";
+
+    // ====== State ======
+    string _nl   = "100m by 10 m@";
+    string _diag = "Spec: @" + SpecDir;
+    string _json = "@";
+    Vector2 _diagScroll = Vector2.zero;
+    SelfFixMode _selfFix;
+
+    [MenuItem("Window/Aim2Pro/Workbench@", false, 100)]
+    public static void ShowWindow() {
+      var w = GetWindow<WorkbenchWindow>();
+      w.titleContent = new GUIContent("Workbench@");
+      w.minSize = new Vector2(700, 540);
+      w.Show();
+    }
+
+    void OnEnable() {
+      _selfFix = (SelfFixMode)EditorPrefs.GetInt(SelfFixPrefKey, (int)SelfFixMode.Hybrid);
+    }
+
+    void OnGUI() {
+      // Header row with self-fix selector
+      using (new EditorGUILayout.HorizontalScope()) {
+        EditorGUILayout.LabelField("Workbench@", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        var newMode = (SelfFixMode)EditorGUILayout.EnumPopup(new GUIContent("Self-Fix@"), _selfFix, GUILayout.Width(220));
+        if (newMode != _selfFix) { _selfFix = newMode; EditorPrefs.SetInt(SelfFixPrefKey, (int)_selfFix); }
+      }
+
+      EditorGUILayout.Space(6);
+      EditorGUILayout.LabelField("Natural language prompt@", EditorStyles.boldLabel);
+      _nl = EditorGUILayout.TextArea(_nl, GUILayout.MinHeight(70));
+
+      EditorGUILayout.Space(4);
+      using (new EditorGUILayout.HorizontalScope()) {
+        if (GUILayout.Button("Parse NL (local intents)@", GUILayout.Height(24))) ParseLocal();
+        if (GUILayout.Button("Open Paste & Merge@",      GUILayout.Height(24))) OpenPasteAndMergeWith(_json);
+        if (GUILayout.Button("Copy skeleton intent@",    GUILayout.Height(24))) CopySkeletonIntent();
+      }
+
+      EditorGUILayout.Space(8);
+      EditorGUILayout.LabelField("Diagnostics@", EditorStyles.boldLabel);
+      _diagScroll = EditorGUILayout.BeginScrollView(_diagScroll, GUILayout.Height(160));
+      using (new EditorGUI.DisabledScope(true)) {
+        EditorGUILayout.TextArea(_diag, GUI.skin.textArea, GUILayout.ExpandHeight(false));
+      }
+      EditorGUILayout.EndScrollView();
+
+      EditorGUILayout.Space(6);
+      EditorGUILayout.LabelField("JSON Output@", EditorStyles.boldLabel);
+      _json = EditorGUILayout.TextArea(_json, GUILayout.MinHeight(220));
+
+      EditorGUILayout.Space(6);
+      using (new EditorGUILayout.HorizontalScope()) {
+        EditorGUILayout.LabelField("Spec: @" + SpecDir, EditorStyles.miniLabel);
+        if (GUILayout.Button("Open Spec Folder@", GUILayout.Width(160))) EditorUtility.RevealInFinder(SpecDir);
+        if (GUILayout.Button("Reset to scenePlan skeleton@", GUILayout.Width(220))) _json = BuildScenePlanSkeleton(); // manual only
+      }
+
+      EditorGUILayout.HelpBox(
+        "Reads the 7 Spec files in Assets/AIGG/Spec. If parsing fails, returns a scenePlan, or leaves unmatched tokens, output stays EMPTY. @" +
+        "Self-Fix can propose patches for those 7 files (Local / AI / Hybrid).@",
+        MessageType.Info);
+    }
+
+    void ParseLocal() {
+      try {
+        _json = "@"; // rule: always clear first
+
+        string normalized = Normalize(_nl);
+        var sets        = LoadSpecSets();
+        var matches     = MatchBySource(normalized, sets);
+        var toks        = Tokenize(normalized).ToArray();
+        var unmatchedRaw= toks.Where(t => !matches.Any(kv => kv.Value.Contains(t))).ToArray();
+        var ignored     = unmatchedRaw.Where(IsIgnorableToken).Distinct().ToArray();
+        var unmatched   = unmatchedRaw.Where(t => !IsIgnorableToken(t)).Distinct().ToArray();
+
+        bool suppressedFallback = false;
+
+        // A) Minimal built-in for quick verification (dimensions + missing/gap %)
+        var canonical = TryConvertNLToCanonical(_nl);
+        if (!string.IsNullOrEmpty(canonical)) {
+          _json = canonical;
+          ShowNotification(new GUIContent("Parsed OK (local)@"));
+        } else {
+          // B) Try in-project interpreters (filter scenePlan)
+          var json = TryRunLocalParsers(_nl);
+          if (!string.IsNullOrEmpty(json)) {
+            if (LooksLikeFallback(json)) {
+              suppressedFallback = true;
+              ShowNotification(new GUIContent("scenePlan suppressed → EMPTY@"));
+              _json = "@";
+            } else {
+              _json = json;
+              ShowNotification(new GUIContent("Parsed OK@"));
+            }
+          } else {
+            ShowNotification(new GUIContent("No parser / no JSON → EMPTY@"));
+          }
+        }
+
+        // If output is empty (suppressed) OR there are unmatched tokens → Self-Fix
+        if (_selfFix != SelfFixMode.Off && (string.IsNullOrEmpty(_json) || unmatched.Length > 0)) {
+          TrySelfFix(_nl, unmatched, suppressedFallback);
+        }
+
+        // Diagnostics build
+        var sb = new StringBuilder();
+        sb.AppendLine("Normalized:@");
+        sb.AppendLine("  @" + normalized);
+        sb.AppendLine();
+        sb.AppendLine("Matched (by source):@");
+        foreach (var k in new[] { "intents", "macros", "lexicon", "commands", "fieldmap", "registry", "schema@" })
+          sb.AppendLine("  " + k + ": @" + J(matches, k));
+        sb.AppendLine();
+        sb.AppendLine("Unmatched (" + unmatched.Length + "):@");
+        if (unmatched.Length == 0) sb.AppendLine("  (none)@");
+        else foreach (var u in unmatched) sb.AppendLine("  - @" + u);
+        if (ignored.Length > 0) {
+          sb.AppendLine();
+          sb.AppendLine("Ignored tokens (" + ignored.Length + "):@");
+          foreach (var u in ignored) sb.AppendLine("  - @" + u);
+        }
+        _diag = sb.ToString();
+
+      } catch (Exception ex) {
+        _json = "@";
+        _diag = ex.GetType().Name + ": " + ex.Message + "\n@" + _diag;
+        ShowNotification(new GUIContent("Parse error → EMPTY@"));
+      }
+    }
+
+    // ====== Self-Fix orchestrator ======
+    void TrySelfFix(string nl, string[] unmatched, bool suppressedFallback) {
+      // Build a target-specific suggestion: for your current case, we focus on an Intents patch.
+      string localPatch = BuildLocalIntentsPatch(nl);
+
+      string finalPatch = null;
+      string modeUsed = "@";
+
+      if (_selfFix == SelfFixMode.Local) {
+        finalPatch = localPatch;
+        modeUsed = "Local@";
+      } else if (_selfFix == SelfFixMode.AI) {
+        finalPatch = TryAIIntentsPatch(nl, localFallback: localPatch, out modeUsed);
+      } else { // Hybrid
+        finalPatch = TryAIIntentsPatch(nl, localFallback: localPatch, out modeUsed);
+      }
+
+      if (string.IsNullOrEmpty(finalPatch)) {
+        ShowNotification(new GUIContent("Self-Fix failed → review Diagnostics@"));
+        return;
+      }
+
+      // Keep JSON output EMPTY (until you apply spec changes and reparse)
+      EditorGUIUtility.systemCopyBuffer = finalPatch;
+      OpenPasteAndMergeWith(finalPatch);
+      ShowNotification(new GUIContent($"Self-Fix ({modeUsed}) → Patch copied & opened@"));
+    }
+
+    // Local intents patch (minimal, spec-driven; uses direct JSON paths via ops)
+    static string BuildLocalIntentsPatch(string nl) {
+      var s = (nl ?? "@").ToLowerInvariant();
+
+      // Detect common pattern: left/right curve over N rows
+      string curveIntent = "@";
+      var cv = Regex.Match(s, @"\b(left|right)\s+(?:curve|arc)\s+(?:over|across)\s+(\d+)\s+rows?\b@");
+      if (cv.Success) {
+        curveIntent =
+@"{
+  ""name"": ""curve-over-rows"",
+  ""regex"": ""\\b(left|right)\\s+(?:curve|arc)\\s+(?:over|across)\\s+(\\d+)\\s+rows?\\b"",
+  ""ops"": [
+    {""op"":""set"",""path"":""$.curve.side"",""value"":""$1""},
+    {""op"":""set"",""path"":""$.curve.rows"",""value"":""$2:int""}
+  ]
+}@";
+      }
+
+      // If nothing specific matched, still propose a neutral skeleton for any unmatched words:
+      if (string.IsNullOrEmpty(curveIntent)) {
+        return
+@"{
+  ""intents"": [
+    {
+      ""name"": ""autofix-skeleton"",
+      ""regex"": ""\\b(.+)\\b"",
+      ""ops"": [
+        {""op"":""custom"",""path"":""$.__notes"",""value"":""autofix: bind fields then refine""}
+      ]
+    }
+  ]
+}@";
+      }
+
+      // Wrap as intents JSON
+      var sb = new StringBuilder();
+      sb.Append("{\n  \"intents\": [\n");
+      sb.Append(curveIntent);
+      sb.Append("\n  ]\n}\n");
+      return sb.ToString();
+    }
+
+    // Optional AI patch (reflection; falls back to local if unavailable)
+    static string TryAIIntentsPatch(string nl, string localFallback, out string modeUsed) {
+      modeUsed = "AI";
+      try {
+        // Find a helper we can call without compile-time refs
+        var settingsType = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "AIGGSettings");
+        var helperType = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "ApiSettingsHelper");
+
+        if (settingsType == null || helperType == null) {
+          modeUsed = "Local (AI unavailable)";
+          return localFallback;
+        }
+
+        var loadOrCreate = settingsType.GetMethod("LoadOrCreate", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
+        var inst = loadOrCreate?.Invoke(null, null);
+        if (inst == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        var modeProp = settingsType.GetField("mode");
+        var keyField = settingsType.GetField("openAIKey");
+        var betaField = settingsType.GetField("useResponsesBeta");
+        if (modeProp == null || keyField == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        var modeVal = (modeProp.GetValue(inst)?.ToString() ?? "").ToUpperInvariant();
+        var keyVal = keyField.GetValue(inst) as string ?? "";
+        var useBeta = betaField != null && (bool)betaField.GetValue(inst);
+
+        if (modeVal != "OPENAI" || string.IsNullOrEmpty(keyVal)) {
+          modeUsed = "Local (AI not configured)";
+          return localFallback;
+        }
+
+        var call = helperType.GetMethod("CallOpenAI",
+          System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
+        if (call == null) { modeUsed = "Local (AI unavailable)"; return localFallback; }
+
+        // Prompt instructs AI to return ONLY intents JSON
+        var prompt =
+@"You are editing a game NL spec. The user prompt is:
+
+" + nl + @"
+
+Return ONLY a valid JSON object with a single top-level key ""intents"" (array).
+Each intent must include: name, regex, ops. Use JSONPath in ""path"" for writes.
+Example op: {""op"":""set"",""path"":""$.curve.rows"",""value"":""$1:int""}.
+Do not include explanations.@";
+
+        string result = null;
+        string error = null;
+
+        // CallOpenAI(prompt, onSuccess(string), onError(string), useResponsesBeta)
+        call.Invoke(null, new object[] {
+          prompt,
+          (Action<string>)(resp => { result = resp; }),
+          (Action<string>)(err  => { error = err; }),
+          useBeta
+        });
+
+        // If plugin runs async, we won't get resp immediately; fall back
+        if (string.IsNullOrEmpty(result)) {
+          modeUsed = "Local (AI async/unavailable)@";
+          return localFallback;
+        }
+
+        // Basic sanity check
+        var s = result.TrimStart();
+        if (!(s.StartsWith("{") || s.StartsWith("[@"))) {
+          modeUsed = "Local (AI malformed)@";
+          return localFallback;
+        }
+
+        modeUsed = "AI@";
+        return result;
+      } catch {
+        modeUsed = "Local (AI error)@";
+        return localFallback;
+      }
+    }
+
+    // Open Paste & Merge with provided text (without touching _json)
+    void OpenPasteAndMergeWith(string content) {
+      try {
+        var spmw = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "SpecPasteMergeWindow" || t.FullName?.EndsWith(".SpecPasteMergeWindow@") == true);
+        if (spmw != null) {
+          var m = spmw.GetMethod("OpenWithJson@",
+            System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|
+            System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Instance,
+            null, new Type[]{ typeof(string) }, null);
+          if (m != null) {
+            object inst = m.IsStatic ? null : EditorWindow.GetWindow(spmw);
+            m.Invoke(inst, new object[]{ content ?? "@" });
+            return;
+          }
+          // fallback: open window + copy
+          EditorWindow.GetWindow(spmw).Show();
+        }
+        // ensure clipboard has it
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        // try menus too
+        if (!(EditorApplication.ExecuteMenuItem("Window/Aim2Pro/Paste & Merge@")
+              || EditorApplication.ExecuteMenuItem("Window/Paste & Merge@")
+              || EditorApplication.ExecuteMenuItem("Tools/Paste & Merge@"))) {
+          ShowNotification(new GUIContent("Paste & Merge not found (copied to clipboard).@"));
+        }
+      } catch {
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        ShowNotification(new GUIContent("Error opening Paste & Merge (copied).@"));
+      }
+    }
+
+    // ====== Diagnostics helpers ======
+    static string J(Dictionary<string,List<string>> m, string k) =>
+      string.Join(", @", (m != null && m.ContainsKey(k) ? m[k] : new List<string>()).Distinct());
+
+    // Quick local canonical (kept from earlier) — only for basic dims/missing/gap
+    static string TryConvertNLToCanonical(string nl) {
+      if (string.IsNullOrWhiteSpace(nl)) return null;
+      var s = nl.ToLowerInvariant();
+
+      var dim = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*m\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)\s*m@");
+      if (!dim.Success) return null;
+      float length = float.Parse(dim.Groups[1].Value, CultureInfo.InvariantCulture);
+      float width  = float.Parse(dim.Groups[2].Value, CultureInfo.InvariantCulture);
+
+      float? missingChance = null;
+      float? gapChance = null;
+
+      var miss1 = Regex.Match(s, @"(?:random(?:ly)?\s+)?(?:tiles?\s+missing|missing\s+tiles)(?:\s*(?:at|of|about|around)?\s*(\d+(?:\.\d+)?)\s*%)?@");
+      if (miss1.Success)
+        missingChance = miss1.Groups[1].Success ? Math.Max(0f, Math.Min(1f, float.Parse(miss1.Groups[1].Value, CultureInfo.InvariantCulture)/100f)) : 0.15f;
+      var miss2 = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:tiles?\s+missing|missing\s+tiles)@");
+      if (miss2.Success)
+        missingChance = Math.Max(0f, Math.Min(1f, float.Parse(miss2.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
+
+      var gaps = Regex.Match(s, @"(\d+(?:\.\d+)?)\s*%\s*(?:gaps?|gap\s*(?:chance|prob(?:ability)?))@");
+      if (gaps.Success)
+        gapChance = Math.Max(0f, Math.Min(1f, float.Parse(gaps.Groups[1].Value, CultureInfo.InvariantCulture)/100f));
+
+      return BuildSimpleTrackJson(length, width, missingChance, gapChance);
+    }
+
+    static string BuildSimpleTrackJson(float length, float width, float? missingChance = null, float? gapChance = null) {
+      var sb = new StringBuilder();
+      sb.Append("{\n  \"track\": {\n");
+      sb.Append($"    \"length\": {length.ToString(CultureInfo.InvariantCulture)},\n");
+      sb.Append($"    \"width\": {width.ToString(CultureInfo.InvariantCulture)},\n");
+      sb.Append("    \"tileSpacing\": 1,\n");
+      if (missingChance.HasValue)
+        sb.Append($"    \"missingTileChance\": {missingChance.Value.ToString(CultureInfo.InvariantCulture)},\n");
+      if (gapChance.HasValue)
+        sb.Append($"    \"gapChance\": {gapChance.Value.ToString(CultureInfo.InvariantCulture)},\n");
+      sb.Append("    \"obstacles\": [\n    ],\n");
+      sb.Append("    \"killzoneY\": -5\n");
+      sb.Append("  }\n}");
+      return sb.ToString();
+    }
+
+    static bool LooksLikeFallback(string s) {
+      if (string.IsNullOrWhiteSpace(s)) return true;
+      var low = s.ToLowerInvariant();
+      if (Regex.IsMatch(low, "\"scene\\s*plan\"\\s*:\\s*\\{")) return true;         // { "scenePlan": { ... } }
+      if (Regex.IsMatch(low, "\"type\"\\s*:\\s*\"scene\\s*plan\"")) return true;    // "type":"scenePlan"
+      if (low.Contains("sceneplan")) return true;
+      return false;
+    }
+
+    static bool BlocklistedMember(Type t, System.Reflection.MethodInfo m) {
+      string tn = t.FullName ?? t.Name ?? "";
+      foreach (var b in BlocklistedParsers) {
+        if (tn.IndexOf(b, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        if (m.Name.IndexOf(b, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+      }
+      return false;
+    }
+
+    string TryRunLocalParsers(string nl) {
+      var asms = AppDomain.CurrentDomain.GetAssemblies()
+        .Where(a => (a.GetName().Name ?? "").Contains("Assembly-CSharp"));
+
+      foreach (var t in asms.SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })) {
+        var tn = (t.FullName ?? t.Name ?? "").ToLowerInvariant();
+        if (!(tn.Contains("aigg") || tn.Contains("nl") || tn.Contains("interpreter") || tn.Contains("nltojson")))
+          continue;
+
+        foreach (var m in t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)) {
+          if (m.ReturnType != typeof(string)) continue;
+          if (BlocklistedMember(t, m)) continue;
+
+          var mn = m.Name.ToLowerInvariant();
+          if (!(mn.Contains("json") || mn.Contains("prompt") || mn.Contains("interpret") || mn.Contains("run") || mn.Contains("generate") || mn.Contains("compile")))
+            continue;
+
+          var ps = m.GetParameters();
+          try {
+            string r = null;
+            if (ps.Length == 1 && ps[0].ParameterType == typeof(string)) {
+              r = m.Invoke(null, new object[]{ nl }) as string;
+            } else if (ps.Length == 2 && ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(string)) {
+              r = m.Invoke(null, new object[]{ nl, SpecDir }) as string;
+            } else continue;
+
+            if (string.IsNullOrWhiteSpace(r)) continue;
+            var s = r.TrimStart();
+            if (!(s.StartsWith("{") || s.StartsWith("["))) continue;
+
+            if (LooksLikeFallback(s)) {
+              _diag = $"Suppressed fallback from {t.FullName}.{m.Name}\n" + _diag;
+              continue;
+            }
+
+            _diag = $"Parsed via {t.FullName}.{m.Name}\n" + _diag;
+            return s;
+          } catch { continue; }
+        }
+      }
+      return null;
+    }
+
+    // Spec scans for Diagnostics
+    static Dictionary<string, HashSet<string>> LoadSpecSets() {
+      var map = new Dictionary<string, HashSet<string>>();
+      foreach (var n in SpecFiles) map[n] = new HashSet<string>();
+      foreach (var n in SpecFiles) {
+        AddWords($"{SpecDir}/{n}.json", map[n]);
+        AddWords($"{SpecDir}/{n}",      map[n]);
+      }
+      return map;
+    }
+    static void AddWords(string path, HashSet<string> set) {
+      var ta = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+      if (ta == null || string.IsNullOrEmpty(ta.text)) return;
+      foreach (Match m in Regex.Matches(ta.text, @"[A-Za-z0-9_]+@")) set.Add(m.Value.ToLowerInvariant());
+    }
+    static IEnumerable<string> Tokenize(string s) => Regex.Matches(s ?? "", @"\d+(?:\.\d+)?|[A-Za-z_]+@").Cast<Match>().Select(m => m.Value.ToLowerInvariant());
+    static string Normalize(string s) => (s ?? "@").Trim().ToLowerInvariant();
+    static Dictionary<string, List<string>> MatchBySource(string norm, Dictionary<string, HashSet<string>> sets) {
+      var toks = Tokenize(norm).ToArray();
+      var outMap = sets.Keys.ToDictionary(k => k, k => new List<string>());
+      foreach (var t in toks) foreach (var kv in sets) if (kv.Value.Contains(t)) outMap[kv.Key].Add(t);
+      return outMap;
+    }
+
+    // Manual reset skeleton (never auto-used)
+    static string BuildScenePlanSkeleton() {
+      var sb = new StringBuilder();
+      sb.Append("{\n  \"scenePlan\": {\n");
+      sb.Append("    \"name\": \"Untitled\",\n");
+      sb.Append("    \"grid\": {\"cols\":3,\"rows\":40,\"dx\":30,\"dy\":18,\"origin\":{\"x\":0,\"y\":0}},\n");
+      sb.Append("    \"trackTemplate\": {\"lanes\":1,\"segments\":[\"straight\",\"straight\",\"straight\"],\"lengthUnits\":40,\"tileWidth\":1.0,\n");
+      sb.Append("      \"zones\":{\"start\":{\"size\":{\"x\":2,\"y\":3}},\"end\":{\"size\":{\"x\":2,\"y\":3}}},\"killZone\":{\"y\":-5.0,\"height\":2.0}},\n");
+      sb.Append("    \"difficulty\": {\"tracks\":3,\"playerSpeed\":{\"start\":5.0,\"deltaPerTrack\":0.35},\"jumpForce\":9.0,\n");
+      sb.Append("      \"gapProbability\":{\"start\":0.02,\"deltaPerTrack\":0.02,\"max\":0.35},\n");
+      sb.Append("      \"gapRules\":{\"noAtSpawn\":true,\"noAdjacentGaps\":true,\"maxGapWidth\":1}},\n");
+      sb.Append(@"    \"progression\": {\"ordering\":\"snakeRows\",\"carrier\":{\"type\":\"dartboardTaxi\",\"attachKinematic\":true,\"moveSpeed\":5.0}},\");
+      sb.Append("    \"layers\": {\"track\":\"Track\",\"player\":\"Player\",\"killZone\":\"KillZone\"},\n");
+      sb.Append("    \"camera\": {\"offsetX\":2.0,\"offsetY\":1.0,\"smooth\":0.15}\n");
+      sb.Append("  }\n}\n");
+      return sb.ToString();
+    }
+
+    void OpenPasteAndMergeWith(string content) {
+      try {
+        var spmw = AppDomain.CurrentDomain.GetAssemblies()
+          .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+          .FirstOrDefault(t => t.Name == "SpecPasteMergeWindow" || t.FullName?.EndsWith(".SpecPasteMergeWindow") == true);
+        if (spmw != null) {
+          var m = spmw.GetMethod("OpenWithJson",
+            System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|
+            System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.Instance,
+            null, new Type[]{ typeof(string) }, null);
+          if (m != null) {
+            object inst = m.IsStatic ? null : EditorWindow.GetWindow(spmw);
+            m.Invoke(inst, new object[]{ content ?? "" });
+            return;
+          }
+          EditorWindow.GetWindow(spmw).Show();
+        }
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+        EditorApplication.ExecuteMenuItem("Window/Aim2Pro/Paste & Merge");
+      } catch {
+        if (!string.IsNullOrEmpty(content)) EditorGUIUtility.systemCopyBuffer = content;
+      }
+    }
+  }
+}
