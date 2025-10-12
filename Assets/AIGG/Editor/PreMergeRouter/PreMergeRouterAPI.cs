@@ -40,13 +40,9 @@ namespace Aim2Pro.AIGG
 
                 if (specType == null) return false;
 
-                // Try static method first
+                // Try static method
                 var m = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (m != null)
-                {
-                    m.Invoke(null, new object[] { json });
-                    return true;
-                }
+                if (m != null) { m.Invoke(null, new object[] { json }); return true; }
 
                 // Try instance method
                 var mInst = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -54,12 +50,11 @@ namespace Aim2Pro.AIGG
                 {
                     var win = EditorWindow.GetWindow(specType);
                     mInst.Invoke(win, new object[] { json });
-                    win.Show();
-                    win.Focus();
+                    win.Show(); win.Focus();
                     return true;
                 }
 
-                // As a last resort, just open the window if possible
+                // As last resort just open the window
                 EditorWindow.GetWindow(specType)?.Show();
                 return false;
             }

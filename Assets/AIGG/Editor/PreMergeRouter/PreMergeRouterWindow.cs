@@ -11,8 +11,7 @@ namespace Aim2Pro.AIGG
         {
             var w = GetWindow<PreMergeRouterWindow>("Pre-Merge Router");
             w.minSize = new Vector2(520, 320);
-            w.Show();
-            w.Focus();
+            w.Show(); w.Focus();
         }
 
         private void OnEnable()
@@ -31,17 +30,13 @@ namespace Aim2Pro.AIGG
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Route JSON"))
-                {
                     PreMergeRouterAPI.Route(_json);
-                }
+
                 if (GUILayout.Button("Paste from Clipboard"))
-                {
                     _json = EditorGUIUtility.systemCopyBuffer ?? "";
-                }
+
                 if (GUILayout.Button("Copy"))
-                {
                     EditorGUIUtility.systemCopyBuffer = _json ?? "";
-                }
             }
         }
     }
