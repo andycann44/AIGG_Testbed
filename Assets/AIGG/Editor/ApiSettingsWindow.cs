@@ -259,13 +259,13 @@ namespace Aim2Pro.AIGG
             if (string.IsNullOrEmpty(s)) return "";
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
-        static string Extract(string json, string pattern)
+    public static string Extract(string json, string pattern)
         {
             if (string.IsNullOrEmpty(json)) return null;
             var m = Regex.Match(json, pattern, RegexOptions.Singleline);
             return m.Success ? m.Groups[1].Value : null;
         }
-        static string Unescape(string s)
+    public static string Unescape(string s)
         {
             if (s == null) return null;
             return s.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\\\", "\\");

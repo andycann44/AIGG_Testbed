@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 // Assets/AIGG/Editor/Workbench/WorkbenchWindow.cs
 #if UNITY_EDITOR
 using UnityEditor;
@@ -144,15 +145,18 @@ namespace Aim2Pro.AIGG.Workbench
       {
         _json = "";
 
-              // AIGG: spec-driven parse first
-      try {
-        if (LocalIntentEngine.TryParse(_nl, SpecDir, out var __specJson) && !string.IsNullOrEmpty(__specJson)) {
-          _json = __specJson;
-          ShowNotification(new GUIContent("Parsed OK (spec intents)"));
-          return;
+        // AIGG: spec-driven parse first (no try/catch nesting)
+        {
+          string __specJson;
+          if (Aim2Pro.AIGG.Workbench.LocalIntentEngine.TryParse(_nl, SpecDir, out __specJson) && !string.IsNullOrEmpty(__specJson))
+          {
+            _json = __specJson;
+            ShowNotification(new UnityEngine.GUIContent("Parsed OK (spec intents)"));
+            return;
+          }
         }
-      } catch {}
-string normalized = Normalize(_nl);
+
+        string normalized = Normalize(_nl);
         var sets = LoadSpecSets();
         var matches = MatchBySource(normalized, sets);
         var toks = Tokenize(normalized).ToArray();
@@ -162,7 +166,7 @@ string normalized = Normalize(_nl);
 
         _lastUnmatched = unmatched.ToList();
 
-        // ---- Gate 1: Unmatched → EMPTY (optional auto-heal + reparse)
+        // Gate 1: unmatched → EMPTY (optionally auto-heal then reparse)
         if (unmatched.Length > 0)
         {
           if (_autoPatch && !_isReparsing)
@@ -175,49 +179,50 @@ string normalized = Normalize(_nl);
               EditorApplication.delayCall += () => { try { ParseLocal(); } finally { _isReparsing = false; } };
             }
           }
-          ShowNotification(new GUIContent("Unmatched tokens → output EMPTY"));
+          ShowNotification(new UnityEngine.GUIContent("Unmatched tokens → output EMPTY"));
           BuildDiagnostics(normalized, matches, unmatched, ignored, "Output cleared due to unmatched tokens.");
           return;
         }
 
-        // ---- Gate 2: residual semantics we didn't convert to JSON → EMPTY
+        // Gate 2: residual semantics → EMPTY
         var residual = GetResidualMeaningfulTokens(normalized);
         if (residual.Length > 0)
         {
-          ShowNotification(new GUIContent("Unaccounted tokens → output EMPTY"));
+          ShowNotification(new UnityEngine.GUIContent("Unaccounted tokens → output EMPTY"));
           BuildDiagnostics(normalized, matches, unmatched, ignored, "Unaccounted tokens: " + string.Join(", ", residual));
           return;
         }
 
-        // ---- Clean → canonical or project interpreters
+        // Canonical fast-path
         var canonical = TryConvertNLToCanonical(_nl);
         if (!string.IsNullOrEmpty(canonical))
         {
           _json = canonical;
-          ShowNotification(new GUIContent("Parsed OK (local)"));
+          ShowNotification(new UnityEngine.GUIContent("Parsed OK (local)"));
           BuildDiagnostics(normalized, matches, unmatched, ignored, null);
           return;
         }
 
+        // Project interpreters
         var json = TryRunLocalParsers(_nl);
         if (!string.IsNullOrEmpty(json))
         {
-          if (LooksLikeFallback(json)) ShowNotification(new GUIContent("scenePlan suppressed → EMPTY"));
-          else { _json = json; ShowNotification(new GUIContent("Parsed OK")); }
+          if (LooksLikeFallback(json)) ShowNotification(new UnityEngine.GUIContent("scenePlan suppressed → EMPTY"));
+          else { _json = json; ShowNotification(new UnityEngine.GUIContent("Parsed OK")); }
           BuildDiagnostics(normalized, matches, unmatched, ignored, null);
           return;
         }
 
-        ShowNotification(new GUIContent("No parser / no JSON → EMPTY"));
+        ShowNotification(new UnityEngine.GUIContent("No parser / no JSON → EMPTY"));
         BuildDiagnostics(normalized, matches, unmatched, ignored, null);
       }
-      catch (Exception ex)
+      catch (System.Exception ex)
       {
         _json = "";
         _diag = ex.GetType().Name + ": " + ex.Message + "\n" + _diag;
-        ShowNotification(new GUIContent("Parse error → EMPTY"));
+        ShowNotification(new UnityEngine.GUIContent("Parse error → EMPTY"));
       }
-    }
+}
 
     void BuildDiagnostics(string normalized, Dictionary<string,List<string>> matches,
                           string[] unmatched, string[] ignored, string extraNote)
@@ -703,88 +708,24 @@ string normalized = Normalize(_nl);
     }
 
     int SelfHealOpenAI(string nl)
-{
-  string tmp = Path.Combine(Path.GetTempPath(), "aigg_nl_" + Guid.NewGuid().ToString("N") + ".txt");
-  File.WriteAllText(tmp, nl ?? "");
-  try
-  {
-    string key = null, model = "gpt-4o-mini";
-    int timeoutSec = 30;
-    bool useResponses = false;
-    try {
-      var st = global::Aim2Pro.AIGG.AIGGSettings.LoadOrCreate();
-      if (st) {
-        key = st.openAIKey;
-        model = string.IsNullOrEmpty(st.model) ? (string.IsNullOrEmpty(st.openAIModel) ? model : st.openAIModel) : st.model;
+    {
+      string tmp = Path.Combine(Path.GetTempPath(), "aigg_nl_" + Guid.NewGuid().ToString("N") + ".txt");
+      File.WriteAllText(tmp, nl ?? "");
+      try
+      {
+        string key = null, model = "gpt-4o-mini";
+        int timeoutSec = 30;
+        bool useResponses = false;
+        try {
+          var st = global::Aim2Pro.AIGG.AIGGSettings.LoadOrCreate();
+          if (st) {
+            key = st.openAIKey;
+            model = string.IsNullOrEmpty(st.model) ? (string.IsNullOrEmpty(st.openAIModel) ? model : st.openAIModel) : st.model;
 #if UNITY_2020_1_OR_NEWER
-        timeoutSec = Mathf.Max(1, st.timeoutSeconds);
+            timeoutSec = Mathf.Max(1, st.timeoutSeconds);
 #endif
-        useResponses = st.useResponsesBeta;
-      }
-    } catch { }
-
-    if (string.IsNullOrEmpty(key))
-    {
-      EditorUtility.DisplayDialog("OpenAI key missing", "Set the key in Window → Aim2Pro → Settings → API Settings.", "OK");
-      return -1;
-    }
-
-    var env = new Dictionary<string,string> {
-      { "OPENAI_API_KEY", key },
-      { "OPENAI_MODEL", model },
-      { "AIGG_TIMEOUT_SECONDS", timeoutSec.ToString() },
-      { "AIGG_USE_RESPONSES", useResponses ? "1" : "0" }
-    };
-
-    var ec = RunScript(OpenAIHealScript, $"--file \"{tmp}\" --model \"{model}\"", out var o, out var e, env);
-
-    // Always log a compact transcript to Diagnostics
-    var aiDir = Path.Combine(SpecDir, "_AI");
-    var log = new StringBuilder();
-    log.AppendLine("[Self-heal OpenAI]");
-    log.AppendLine(" script: " + OpenAIHealScript);
-    log.AppendLine(" exit: " + ec.ToString());
-    log.AppendLine(" aiDir: " + aiDir);
-    if (!string.IsNullOrEmpty(o)) { log.AppendLine(" stdout:"); log.AppendLine(o.Trim()); }
-    if (!string.IsNullOrEmpty(e)) { log.AppendLine(" stderr:"); log.AppendLine(e.Trim()); }
-    _diag = log.ToString().TrimEnd() + "\n" + _diag;
-
-    // Prefer explicit file path from stdout
-    string wrote = null;
-    if (!string.IsNullOrEmpty(o))
-    {
-      foreach (var line in o.Split('\n'))
-        if (line.StartsWith("WROTE_PATCH:"))
-          wrote = line.Substring("WROTE_PATCH:".Length).Trim();
-    }
-
-    if (!string.IsNullOrEmpty(wrote) && File.Exists(wrote))
-    {
-      _json = File.ReadAllText(wrote);
-      OpenPasteAndMerge();
-      ShowNotification(new GUIContent("AI patch created → Paste & Merge opened"));
-      return 0;
-    }
-
-    // Fallback: refresh and scan the _AI directory
-    AssetDatabase.Refresh();
-    if (!Directory.Exists(aiDir)) Directory.CreateDirectory(aiDir);
-    var patch = Directory.GetFiles(aiDir, "patch_*.json").OrderByDescending(f => f).FirstOrDefault();
-    if (!string.IsNullOrEmpty(patch) && File.Exists(patch))
-    {
-      _json = File.ReadAllText(patch);
-      OpenPasteAndMerge();
-      ShowNotification(new GUIContent("AI patch found → Paste & Merge opened"));
-      return 0;
-    }
-
-    // Nothing found; open folder for you and notify
-    EditorUtility.RevealInFinder(aiDir);
-    ShowNotification(new GUIContent("No patch file found. See Diagnostics for stdout/stderr."));
-    return (ec == 0) ? 1 : ec;
-  }
-  finally { try { File.Delete(tmp); } catch { } }
-}
+            useResponses = st.useResponsesBeta;
+          }
         } catch { }
 
         if (string.IsNullOrEmpty(key))
@@ -801,26 +742,62 @@ string normalized = Normalize(_nl);
         };
 
         var ec = RunScript(OpenAIHealScript, $"--file \"{tmp}\" --model \"{model}\"", out var o, out var e, env);
-        _diag = (o + (string.IsNullOrEmpty(e) ? "" : "\n" + e)).Trim() + "\n" + _diag;
 
-        if (ec == 0)
+        // Always log a compact transcript to Diagnostics
+        var aiDir = Path.Combine(SpecDir, "_AI");
+        var log = new StringBuilder();
+        log.AppendLine("[Self-heal OpenAI]");
+        log.AppendLine(" script: " + OpenAIHealScript);
+        log.AppendLine(" exit: " + ec.ToString());
+        log.AppendLine(" aiDir: " + aiDir);
+        if (!string.IsNullOrEmpty(o)) { log.AppendLine(" stdout:"); log.AppendLine(o.Trim()); }
+        if (!string.IsNullOrEmpty(e)) { log.AppendLine(" stderr:"); log.AppendLine(e.Trim()); }
+        _diag = log.ToString().TrimEnd() + "\n" + _diag;
+
+        // Prefer explicit file path from stdout
+        string wrote = null;
+        if (!string.IsNullOrEmpty(o))
         {
-          AssetDatabase.Refresh();
-          var aiDir = Path.Combine(SpecDir, "_AI");
-          if (Directory.Exists(aiDir))
-          {
-            var patch = Directory.GetFiles(aiDir, "patch_*.json").OrderByDescending(f => f).FirstOrDefault();
-            if (!string.IsNullOrEmpty(patch))
-            {
-              _json = File.ReadAllText(patch);
-              OpenPasteAndMerge();
-            }
-          }
+          foreach (var line in o.Split('\n'))
+            if (line.StartsWith("WROTE_PATCH:"))
+              wrote = line.Substring("WROTE_PATCH:".Length).Trim();
         }
-        return ec;
+
+        // If runner gave a concrete path, use it
+        if (!string.IsNullOrEmpty(wrote) && File.Exists(wrote))
+        {
+          try
+          {
+            var patchJson = File.ReadAllText(wrote);
+            global::Aim2Pro.AIGG.Aigg.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+            ShowNotification(new GUIContent("AI patch created → Pre-Merge Router opened"));
+            return 0;
+          }
+          catch (Exception) { /* fall through to fallback scan */ }
+        }
+
+        // Fallback: refresh and scan the _AI directory
+        AssetDatabase.Refresh();
+        if (!Directory.Exists(aiDir)) Directory.CreateDirectory(aiDir);
+        var patch = Directory.GetFiles(aiDir, "patch_*.json").OrderByDescending(f => f).FirstOrDefault();
+        if (!string.IsNullOrEmpty(patch) && File.Exists(patch))
+        {
+          var patchJson = File.ReadAllText(patch);
+          global::Aim2Pro.AIGG.Aigg.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+          ShowNotification(new GUIContent("AI patch found → Pre-Merge Router opened"));
+          return 0;
+        }
+
+        // Nothing found; open folder for you and notify
+        EditorUtility.RevealInFinder(aiDir);
+        ShowNotification(new GUIContent("No patch file found. See Diagnostics for stdout/stderr."));
+        return (ec == 0) ? 1 : ec;
       }
       finally { try { File.Delete(tmp); } catch { } }
     }
+
   }
+
 }
+#endif
 #endif

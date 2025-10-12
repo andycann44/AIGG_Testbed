@@ -40,9 +40,15 @@ namespace Aim2Pro.AIGG
         string preview = "";
         int addCount = 0, dupCount = 0, sameCount = 0, errCount = 0;
 
-        Vector2 svPaste, svDetail, svPreview;
+    Vector2 svPaste, svDetail, svPreview, svStatus;
 
-        static string SpecRoot => "Assets/StickerDash/AIGG/Resources/Spec";
+    // Scroll/box heights (tweak to fit smaller screens)
+    const int BOX_PASTE_H = 180;
+    const int BOX_STATUS_H = 56;   // help/status box (now scrollable)
+    const int BOX_DETAIL_H = 80;
+    const int BOX_PREVIEW_H = 160;
+
+        static string SpecRoot => "Assets/AIGG/Spec";
 
         // --- Paths (now includes Commands/Macros) ---
         static string PathFor(TargetType t)
@@ -204,7 +210,7 @@ namespace Aim2Pro.AIGG
 
             // Paste area
             EditorGUILayout.LabelField("Pasted Content", EditorStyles.miniBoldLabel);
-            svPaste = EditorGUILayout.BeginScrollView(svPaste, GUILayout.MinHeight(180));
+            svPaste = EditorGUILayout.BeginScrollView(svPaste, GUILayout.MinHeight(BOX_PASTE_H));
             pasted = EditorGUILayout.TextArea(pasted ?? "", GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
 
@@ -221,23 +227,25 @@ namespace Aim2Pro.AIGG
                 }
             }
 
-            // Status
+            // Status (now scrollable, constrained height)
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);
+            svStatus = EditorGUILayout.BeginScrollView(svStatus, GUILayout.MinHeight(BOX_STATUS_H));
             EditorGUILayout.HelpBox(
                 string.IsNullOrEmpty(status) ? "—"
                 : $"{status}\nAdd: {addCount} | Duplicates: {dupCount} | Same: {sameCount} | Errors: {errCount}",
                 MessageType.Info);
+            EditorGUILayout.EndScrollView();
 
             // Detail
             EditorGUILayout.LabelField("Duplicate / Error Detail");
-            svDetail = EditorGUILayout.BeginScrollView(svDetail, GUILayout.MinHeight(120));
+            svDetail = EditorGUILayout.BeginScrollView(svDetail, GUILayout.MinHeight(BOX_DETAIL_H));
             EditorGUILayout.TextArea(string.IsNullOrEmpty(detail) ? "—" : detail, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
 
             // Preview
             EditorGUILayout.LabelField("Preview (Post-Merge)");
-            svPreview = EditorGUILayout.BeginScrollView(svPreview, GUILayout.MinHeight(160));
+            svPreview = EditorGUILayout.BeginScrollView(svPreview, GUILayout.MinHeight(BOX_PREVIEW_H));
             EditorGUILayout.TextArea(string.IsNullOrEmpty(preview) ? "—" : preview, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
 
@@ -928,4 +936,5 @@ namespace Aim2Pro.AIGG
         }
     }
 }
+
 #endif
