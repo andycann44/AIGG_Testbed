@@ -21,7 +21,7 @@ namespace Aim2Pro.AIGG
 
         private void OnGUI()
         {
-            GUILayout.Label("OpenAI JSON → Paste & Merge", EditorStyles.boldLabel);
+            GUILayout.Label("OpenAI JSON -> Paste & Merge", EditorStyles.boldLabel);
             EditorGUILayout.Space();
 
             _json = EditorGUILayout.TextArea(_json, GUILayout.ExpandHeight(true));
@@ -29,14 +29,9 @@ namespace Aim2Pro.AIGG
             EditorGUILayout.Space();
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Route JSON"))
-                    PreMergeRouterAPI.Route(_json);
-
-                if (GUILayout.Button("Paste from Clipboard"))
-                    _json = EditorGUIUtility.systemCopyBuffer ?? "";
-
-                if (GUILayout.Button("Copy"))
-                    EditorGUIUtility.systemCopyBuffer = _json ?? "";
+                if (GUILayout.Button("Route JSON")) PreMergeRouterAPI.Route(_json);
+                if (GUILayout.Button("Paste from Clipboard")) _json = EditorGUIUtility.systemCopyBuffer ?? "";
+                if (GUILayout.Button("Copy")) EditorGUIUtility.systemCopyBuffer = _json ?? "";
             }
         }
     }

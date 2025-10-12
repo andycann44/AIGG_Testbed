@@ -33,18 +33,16 @@ namespace Aim2Pro.AIGG
         {
             try
             {
-                var asms = AppDomain.CurrentDomain.GetAssemblies();
-                var specType = asms
+                var specType = AppDomain.CurrentDomain
+                    .GetAssemblies()
                     .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
                     .FirstOrDefault(t => t.Name == "SpecPasteMergeWindow");
 
                 if (specType == null) return false;
 
-                // Try static method
                 var m = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (m != null) { m.Invoke(null, new object[] { json }); return true; }
 
-                // Try instance method
                 var mInst = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (mInst != null)
                 {
@@ -54,7 +52,6 @@ namespace Aim2Pro.AIGG
                     return true;
                 }
 
-                // As last resort just open the window
                 EditorWindow.GetWindow(specType)?.Show();
                 return false;
             }
