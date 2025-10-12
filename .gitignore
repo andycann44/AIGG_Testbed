@@ -102,3 +102,5 @@ Assets/**/__RecompilePing*.cs
 *.bak
 *.tmp
 *.zsh
+Assets/**/__RecompilePing*.cs
+Assets/**/__RecompilePing*.cs.meta
