@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 using System;
 using System.Linq;
 using System.Reflection;
@@ -20,16 +21,13 @@ namespace Aim2Pro.AIGG
         public static void Route(string json)
         {
             _lastJson = json ?? string.Empty;
-            EditorGUIUtility.systemCopyBuffer = _lastJson; // clipboard fallback
-
-            if (!TryForwardToPasteMerge(_lastJson))
-            {
-                Debug.Log("[AIGG] SpecPasteMergeWindow.OpenWithJson not found. JSON copied to clipboard.");
-                PreMergeRouterWindow.Open();
-            }
+            // Clipboard so user can paste if merge window is missing
+            EditorGUIUtility.systemCopyBuffer = _lastJson;
+            PreMergeRouterWindow.Open();
+            PreMergeRouterWindow.SetInput(_lastJson);
         }
 
-        private static bool TryForwardToPasteMerge(string json)
+        internal static bool TrySendToPasteMerge(string json)
         {
             try
             {
@@ -37,27 +35,27 @@ namespace Aim2Pro.AIGG
                     .GetAssemblies()
                     .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
                     .FirstOrDefault(t => t.Name == "SpecPasteMergeWindow");
-
                 if (specType == null) return false;
 
-                var m = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (m != null) { m.Invoke(null, new object[] { json }); return true; }
+                var staticOpen = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (staticOpen != null) { staticOpen.Invoke(null, new object[] { json }); return true; }
 
-                var mInst = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (mInst != null)
+                var instOpen = specType.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (instOpen != null)
                 {
                     var win = EditorWindow.GetWindow(specType);
-                    mInst.Invoke(win, new object[] { json });
+                    instOpen.Invoke(win, new object[] { json });
                     win.Show(); win.Focus();
                     return true;
                 }
 
+                // As last resort just open the window
                 EditorWindow.GetWindow(specType)?.Show();
                 return false;
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[AIGG] Router forward failed: " + e.Message);
+                Debug.LogWarning("[AIGG] Paste & Merge reflection failed: " + e.Message);
                 return false;
             }
         }
