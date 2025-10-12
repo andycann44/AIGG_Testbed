@@ -1,39 +1,106 @@
 {
   "intents": [
     {
-      "name": "set-size-length-by-width",
-      "regex": "\\b(\\d+(?:\\.\\d+)?)\\s*m\\s*(?:x|by|\u00d7)\\s*(\\d+(?:\\.\\d+)?)\\s*m\\b",
+      "name": "length-width-by",
+      "regex": "\\b(\\d+)\\s*m\\s*by\\s*(\\d+)\\s*m\\b",
       "ops": [
         {
           "op": "set",
-          "path": "$.trackTemplate.lengthUnits",
-          "value": "$1:float"
+          "path": "$.trackTemplate.lengthMeters",
+          "value": "$1:int"
         },
         {
           "op": "set",
           "path": "$.trackTemplate.tileWidth",
-          "value": "$2:float"
+          "value": "$2:int"
+        },
+        {
+          "op": "set",
+          "path": "$.trackTemplate.tileSize",
+          "value": 1.0
+        },
+        {
+          "op": "set",
+          "path": "$.trackTemplate.killzoneY",
+          "value": -5.0
         }
       ]
     },
     {
-      "name": "rebuild-length-by-width",
-      "regex": "\\brebuild\\s+(\\d+(?:\\.\\d+)?)\\s*m?\\s*(?:x|by|\u00d7)\\s*(\\d+(?:\\.\\d+)?)\\s*m?\\b",
+      "name": "curve-rows-range-side-deg",
+      "regex": "\\bcurve\\s+rows\\s+(\\d+)\\s*(?:-|to)\\s*(\\d+)\\s+(left|right)\\s+(\\d+)\\s*deg\\b",
       "ops": [
         {
           "op": "set",
-          "path": "$.trackTemplate.lengthUnits",
+          "path": "$.segments[0].op",
+          "value": "CurveRows"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[0].start",
+          "value": "$1:int"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[0].end",
+          "value": "$2:int"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[0].side",
+          "value": "$3"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[0].deg",
+          "value": "$4:int"
+        }
+      ]
+    },
+    {
+      "name": "spikes-every-m",
+      "regex": "\\bspikes?\\s+every\\s+(\\d+)\\s*m\\b",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.segments[1].op",
+          "value": "SpawnEvery"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[1].type",
+          "value": "spike"
+        },
+        {
+          "op": "set",
+          "path": "$.segments[1].every",
+          "value": "$1:int"
+        }
+      ]
+    },
+    {
+      "name": "generate_track",
+      "regex": "^(\\d+)m by (\\d+)m with (left|right) (\\d+) degree curve and (\\d+)m under the track with clearance$",
+      "ops": [
+        {
+          "op": "set",
+          "path": "$.track.length",
           "value": "$1:float"
         },
         {
           "op": "set",
-          "path": "$.trackTemplate.tileWidth",
+          "path": "$.track.width",
           "value": "$2:float"
         },
         {
           "op": "set",
-          "path": "$.meta.rebuild",
-          "value": "true:bool"
+          "path": "$.track.curve",
+          "value": "curve_$4_$3"
+        },
+        {
+          "op": "set",
+          "path": "$.track.clearance",
+          "value": "$5:float"
         }
       ]
     }
