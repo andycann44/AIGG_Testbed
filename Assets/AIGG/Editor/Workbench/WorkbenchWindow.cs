@@ -2,6 +2,8 @@
 // Assets/AIGG/Editor/Workbench/WorkbenchWindow.cs
 #if UNITY_EDITOR
 using UnityEditor;
+using Aim2Pro.AIGG.Workbench;
+using Aim2Pro.AIGG;
 using UnityEngine;
 using System;
 using System.Linq;
@@ -769,7 +771,7 @@ namespace Aim2Pro.AIGG.Workbench
           try
           {
             var patchJson = File.ReadAllText(wrote);
-            global::Aim2Pro.AIGG.Aigg.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+            global::Aim2Pro.AIGG.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
             ShowNotification(new GUIContent("AI patch created → Pre-Merge Router opened"));
             return 0;
           }
@@ -783,7 +785,7 @@ namespace Aim2Pro.AIGG.Workbench
         if (!string.IsNullOrEmpty(patch) && File.Exists(patch))
         {
           var patchJson = File.ReadAllText(patch);
-          global::Aim2Pro.AIGG.Aigg.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+          global::Aim2Pro.AIGG.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
           ShowNotification(new GUIContent("AI patch found → Pre-Merge Router opened"));
           return 0;
         }
