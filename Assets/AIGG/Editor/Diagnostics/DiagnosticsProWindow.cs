@@ -10,8 +10,8 @@ namespace Aim2Pro.AIGG
     public class DiagnosticsProWindow : EditorWindow
     {
         private string _nl = "";
-        private List<string> _matched = new List<string>();
-        private List<string> _unmatched = new List<string>();
+        private readonly List<string> _matched = new List<string>();
+        private readonly List<string> _unmatched = new List<string>();
         private int _selectedUnmatched = -1;
 
         private static readonly string SpecDir = "Assets/AIGG/Spec";
@@ -29,79 +29,77 @@ namespace Aim2Pro.AIGG
             EditorGUILayout.LabelField("Natural Language", EditorStyles.boldLabel);
             _nl = EditorGUILayout.TextArea(_nl, GUILayout.Height(100));
 
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("Scan", GUILayout.Height(24))) ScanNow();
-                GUILayout.FlexibleSpace();
-                EditorGUILayout.LabelField("Matched: " + _matched.Count + "    Unmatched: " + _unmatched.Count, GUILayout.Width(220));
-            }
+            EditorGUILayout.Space();
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Scan", GUILayout.Height(24))) { ScanNow(); }
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("Matched: " + _matched.Count + "    Unmatched: " + _unmatched.Count, GUILayout.Width(260));
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
-            using (new EditorGUILayout.HorizontalScope())
+
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUILayout.BeginVertical("box", GUILayout.Width(position.width * 0.48f));
+            EditorGUILayout.LabelField("Matched", EditorStyles.boldLabel);
+            for (int i = 0; i < _matched.Count; i++) { EditorGUILayout.LabelField("• " + _matched[i]); }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Unmatched (click to inspect)", EditorStyles.boldLabel);
+            for (int i = 0; i < _unmatched.Count; i++)
             {
-                using (new EditorGUILayout.VerticalScope("box", GUILayout.Width(position.width/2 - 8)))
-                {
-                    EditorGUILayout.LabelField("Matched", EditorStyles.boldLabel);
-                    foreach (var m in _matched) EditorGUILayout. " + m);LabelField("
-                }
-                using (new EditorGUILayout.VerticalScope("box"))
-                {
-                    EditorGUILayout.LabelField("Unmatched (click to inspect)", EditorStyles.boldLabel);
-
-                    // clickable list
-                    for (int i=0;i<_unmatched.Count;i++)
-                    {
-                        var isSel = i == _selectedUnmatched;
-                        var style = isSel ? EditorStyles.whiteLabel : EditorStyles.label;
-                        if (GUILayout. " + _unmatched[i], style))Button("
-                            _selectedUnmatched = i;
-                    }
-
-                    if (_selectedUnmatched >= 0 && _selectedUnmatched < _unmatched.Count)
-                    {
-                        var u = _unmatched[_selectedUnmatched];
-                        EditorGUILayout.Space();
-                        EditorGUILayout.LabelField("Token: " + u, EditorStyles.boldLabel);
-                        EditorGUILayout.LabelField("Suggested regex:", EditorStyles.miniBoldLabel);
-                        EditorGUILayout.TextField("\\b" + Regex.Escape(u) + "\\b");
-                    }
-                }
+                if (GUILayout.Button("• " + _unmatched[i], GUILayout.Height(20))) { _selectedUnmatched = i; }
             }
+            if (_selectedUnmatched >= 0 && _selectedUnmatched < _unmatched.Count)
+            {
+                string u = _unmatched[_selectedUnmatched];
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Token: " + u, EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Suggested regex:", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextField("\\b" + Regex.Escape(u) + "\\b");
+            }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
-            using (new EditorGUILayout.HorizontalScope())
+            EditorGUILayout.BeginHorizontal();
+            bool disable = _unmatched.Count == 0;
+            using (new EditorGUI.DisabledScope(disable))
             {
-                using (new EditorGUI.DisabledScope(_unmatched.Count == 0))
-                {
-                    if (GUILayout.Button("Self-Fix (Local Patch)", GUILayout.Height(26)))
-                        PreMergeRouterAPI.Route(BuildLocalPatchJSON(_unmatched));
- Router)", GUILayout.Height(26)))
-                        PreMergeRouterAPI.Route(BuildAIEnvelope(_nl, _unmatched));
-                }
+                if (GUILayout.Button("Self-Fix (Local Patch)", GUILayout.Height(26)))
+                    PreMergeRouterAPI.Route(BuildLocalPatchJSON(_unmatched));
+                if (GUILayout.Button("Self-Fix (AI -> Router)", GUILayout.Height(26)))
+                    PreMergeRouterAPI.Route(BuildAIEnvelope(_nl, _unmatched));
             }
+            EditorGUILayout.EndHorizontal();
         }
 
-        // ===== scan helpers =====
         private void ScanNow()
         {
             _matched.Clear(); _unmatched.Clear();
-            var text = (_nl ?? "").Trim().ToLowerInvariant();
+            string text = (_nl ?? "").Trim().ToLowerInvariant();
             if (string.IsNullOrEmpty(text)) return;
 
-            var lex = LoadLexicon();
-            var rx = LoadIntentRegexes();
+            HashSet<string> lex = LoadLexicon();
+            List<string> rx = LoadIntentRegexes();
+
             foreach (Match m in Regex.Matches(text, "[a-z0-9]+"))
             {
-                var w = m.Value;
+                string w = m.Value;
                 if (IsStop(w)) { _matched.Add(w); continue; }
+
                 bool ok = lex.Contains(w);
                 if (!ok)
                 {
-                    foreach (var pat in rx)
+                    for (int i = 0; i < rx.Count; i++)
                     {
+                        string pat = rx[i];
                         try
                         {
-                            var one = pat.Replace("\\\\","\\");
+                            string one = pat.Replace("\\\\", "\\");
                             if (Regex.IsMatch(text, one, RegexOptions.IgnoreCase)) { ok = true; break; }
                         } catch {}
                     }
@@ -129,10 +127,16 @@ namespace Aim2Pro.AIGG
             var set = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
             try
             {
-                var p = Path.Combine(SpecDir, "lexicon.json");
+                string p = Path.Combine(SpecDir, "lexicon.json");
                 if (File.Exists(p))
-                    foreach (Match m in Regex.Matches(File.ReadAllText(p), "\"([^\"]+)\""))
-                        set.Add(m.Groups[1].Value.Trim());
+                {
+                    string s = File.ReadAllText(p);
+                    foreach (Match m in Regex.Matches(s, "\"([^\"]+)\""))
+                    {
+                        string v = m.Groups[1].Value.Trim();
+                        if (!string.IsNullOrEmpty(v)) set.Add(v);
+                    }
+                }
             } catch {}
             return set;
         }
@@ -142,10 +146,16 @@ namespace Aim2Pro.AIGG
             var list = new List<string>();
             try
             {
-                var p = Path.Combine(SpecDir, "intents.json");
+                string p = Path.Combine(SpecDir, "intents.json");
                 if (File.Exists(p))
-                    foreach (Match m in Regex.Matches(File.ReadAllText(p), "\"regex\"\\s*:\\s*\"([^\"]+)\""))
-                        list.Add(m.Groups[1].Value.Trim());
+                {
+                    string s = File.ReadAllText(p);
+                    foreach (Match m in Regex.Matches(s, "\"regex\"\\s*:\\s*\"([^\"]+)\""))
+                    {
+                        string v = m.Groups[1].Value.Trim();
+                        if (!string.IsNullOrEmpty(v)) list.Add(v);
+                    }
+                }
             } catch {}
             return list;
         }
@@ -153,20 +163,28 @@ namespace Aim2Pro.AIGG
         private static string BuildLocalPatchJSON(List<string> unmatched)
         {
             var items = new List<string>();
-            foreach (var u in unmatched)
+            for (int i = 0; i < unmatched.Count; i++)
             {
+                string u = unmatched[i];
                 if (string.IsNullOrWhiteSpace(u)) continue;
-                var rx="\\\\b"+Regex.Escape(u)+"\\\\b";
-                items.Add("{\"name\":\"auto-"+u+"\",\"regex\":\""+rx+"\",\"ops\":[{\"op\":\"custom\",\"path\":\"$.\",\"value\":\"define-"+u+"\"}]}");
+                string rx = "\\\\b" + Regex.Escape(u) + "\\\\b";
+                items.Add("{\"name\":\"auto-" + u + "\",\"regex\":\"" + rx + "\",\"ops\":[{\"op\":\"custom\",\"path\":\"$.\",\"value\":\"define-" + u + "\"}]}");
             }
-            return "{ \"intents\": ["+string.Join(",", items)+"] }";
+            return "{ \"intents\": [" + string.Join(",", items.ToArray()) + "] }";
         }
 
         private static string BuildAIEnvelope(string nl, List<string> unmatched)
         {
-            string esc(string s)=> (s??"").Replace("\\","\\\\").Replace("\"","\\\"");
-            var inner = string.Join(",", (unmatched??new List<string>()).ConvertAll(q=>"\""+esc(q)+"\""));
-            return "{\"nl\":\""+esc(nl)+"\",\"issues\":{\"unmatched\":["+inner+"]},\"request\":\"propose intents\",\"schema\":\"intents\"}";
+            string escapedNl = Esc(nl);
+            var q = new List<string>();
+            for (int i = 0; i < unmatched.Count; i++) q.Add("\"" + Esc(unmatched[i]) + "\"");
+            return "{\"nl\":\"" + escapedNl + "\",\"issues\":{\"unmatched\":[" + string.Join(",", q.ToArray()) + "]},\"request\":\"propose intents\",\"schema\":\"intents\"}";
+        }
+
+        private static string Esc(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }
