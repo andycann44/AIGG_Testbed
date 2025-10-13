@@ -1,3 +1,4 @@
+// WorkbenchWindow. PANIC GREEN minimalcs 
 using UnityEditor;
 using UnityEngine;
 
@@ -13,37 +14,30 @@ namespace Aim2Pro.AIGG.Workbench
             w.Show();
         }
 
-        private string _nl = "";
-        private string _status = "";
-        private string _lastJson = "";
+        string nl = "";
+        string status = "Ready.";
 
-        private void OnGUI()
+        void OnGUI()
         {
             EditorGUILayout.LabelField("NL Input", EditorStyles.boldLabel);
-            _nl = EditorGUILayout.TextArea(_nl, GUILayout.Height(140));
+            nl = EditorGUILayout.TextArea(nl, GUILayout.Height(140));
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Parse NL (local)", GUILayout.Height(26)))
-                {
-                    var (ok, payload) = WorkbenchSafe.TryParseLocal(_nl);
-                    if (ok) { _lastJson = payload; _status = "[OK] Local parse produced JSON."; }
-                    else    { _lastJson = "";      _status = payload; }
-                }
+                if (GUILayout.Button("Parse NL (noop)", GUILayout.Height(26)))
+                    status = "Parse skipped (panic mode).";
 
-                if (GUILayout.Button("Send to Paste & Merge", GUILayout.Height(26)))
+                if (GUILayout.Button("Export JSON (clipboard)", GUILayout.Height(26)))
                 {
-                    var json = string.IsNullOrEmpty(_lastJson) ? "{ \"note\": \"empty payload\" }" : _lastJson;
-                    _status = WorkbenchSafe.RouteToPasteAndMerge(json);
+                    var json = string.IsNullOrWhiteSpace(nl) ? "{ \"note\": \"empty\" }" : "{ \"nl\": \"" + nl.Replace("\\","\\\\").Replace("\"","\\\"") + "\" }";
+                    EditorGUIUtility.systemCopyBuffer = json;
+                    status = "JSON copied to clipboard.";
                 }
             }
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(_status ?? "", MessageType.Info);
-
-            EditorGUILayout.LabelField("Last JSON (readonly preview)", EditorStyles.boldLabel);
-            EditorGUILayout.TextArea(_lastJson ?? "", GUILayout.Height(140));
+            EditorGUILayout.HelpBox(status, MessageType.None);
         }
     }
 }
