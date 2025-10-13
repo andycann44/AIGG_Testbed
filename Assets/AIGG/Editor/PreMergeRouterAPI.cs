@@ -5,7 +5,6 @@ using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
-    // Stable entry point Workbench calls: PreMergeRouterAPI.Route(json)
     public static class PreMergeRouterAPI
     {
         public static void Route(string json)
@@ -16,45 +15,37 @@ namespace Aim2Pro.AIGG
                 return;
             }
 
-            // Find PreMergeRouterWindow.OpenWithJson(string) via reflection
-            Type t = null;
-            MethodInfo m = null;
+            // Prefer new center
+            if (CallStatic("Aim2Pro.AIGG.PreMergeCenterWindow", "OpenWithJson", json))
+                return;
+
+            // Or legacy router window
+            if (CallStatic("Aim2Pro.AIGG.PreMergeRouterWindow", "OpenWithJson", json))
+                return;
+
+            // Fallback: clipboard
+            EditorGUIUtility.systemCopyBuffer = json;
+            Debug.Log("[PreMergeRouterAPI] No Pre-Merge window found; JSON copied to clipboard.");
+        }
+
+        public static void Route(string json, bool _) { Route(json); }
+
+        private static bool CallStatic(string typeName, string methodName, string arg)
+        {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 try
                 {
-                    t = asm.GetType("Aim2Pro.AIGG.PreMergeRouterWindow");
-                    if (t != null)
-                    {
-                        m = t.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.Static);
-                        break;
-                    }
+                    var t = asm.GetType(typeName);
+                    if (t == null) continue;
+                    var m = t.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+                    if (m == null) continue;
+                    m.Invoke(null, new object[] { arg });
+                    return true;
                 }
-                catch { /* ignore */ }
+                catch { }
             }
-
-            if (t != null && m != null)
-            {
-                try
-                {
-                    m.Invoke(null, new object[] { json });
-                    return;
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning("[PreMergeRouterAPI] Invoke failed: " + e.Message);
-                }
-            }
-
-            // Fallback: copy to clipboard so Paste & Merge can be used manually
-            EditorGUIUtility.systemCopyBuffer = json;
-            Debug.Log("[PreMergeRouterAPI] Router window not found; JSON copied to clipboard.");
-        }
-
-        // Legacy overload some codepaths still call
-        public static void Route(string json, bool _)
-        {
-            Route(json);
+            return false;
         }
     }
 }
