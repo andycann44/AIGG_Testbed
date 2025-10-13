@@ -1,4 +1,4 @@
-// WorkbenchWindow. PANIC GREEN minimalcs 
+// WorkbenchWindow. minimal, compile-safecs 
 using UnityEditor;
 using UnityEngine;
 
@@ -25,11 +25,12 @@ namespace Aim2Pro.AIGG.Workbench
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Parse NL (noop)", GUILayout.Height(26)))
-                    status = "Parse skipped (panic mode).";
+                    status = "Parse skipped (baseline).";
 
                 if (GUILayout.Button("Export JSON (clipboard)", GUILayout.Height(26)))
                 {
-                    var json = string.IsNullOrWhiteSpace(nl) ? "{ \"note\": \"empty\" }" : "{ \"nl\": \"" + nl.Replace("\\","\\\\").Replace("\"","\\\"") + "\" }";
+                    var json = string.IsNullOrWhiteSpace(nl) ? "{ \"note\": \"empty\" }" :
+                        "{ \"nl\": \"" + nl.Replace("\\","\\\\").Replace("\"","\\\"") + "\" }";
                     EditorGUIUtility.systemCopyBuffer = json;
                     status = "JSON copied to clipboard.";
                 }
