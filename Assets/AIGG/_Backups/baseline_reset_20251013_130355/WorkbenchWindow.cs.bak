@@ -1,3 +1,5 @@
+// WorkbenchWindow.cs (lockdown minimal)
+// Menu: Window/Aim2Pro/Aigg/Workbench
 using UnityEditor;
 using UnityEngine;
 
@@ -31,10 +33,12 @@ namespace Aim2Pro.AIGG.Workbench
                     else    { _lastJson = "";      _status = payload; }
                 }
 
-                if (GUILayout.Button("Send to Paste & Merge", GUILayout.Height(26)))
+                if (GUILayout.Button("Open Pre-Merge Router", GUILayout.Height(26)))
                 {
-                    var json = string.IsNullOrEmpty(_lastJson) ? "{ \"note\": \"empty payload\" }" : _lastJson;
-                    _status = WorkbenchSafe.RouteToPasteAndMerge(json);
+                    var msg = Aim2Pro.AIGG.Workbench.WorkbenchSafe.RouteJson(
+                        string.IsNullOrEmpty(_lastJson) ? "{ \"note\": \"empty payload\" }" : _lastJson
+                    );
+                    _status = msg;
                 }
             }
 
@@ -47,3 +51,4 @@ namespace Aim2Pro.AIGG.Workbench
         }
     }
 }
+

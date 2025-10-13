@@ -1,80 +1,57 @@
-// WorkbenchSafe.cs
-// A tiny facade so WorkbenchWindow never crashes if dependencies are missing.
 using System;
 using System.Reflection;
+using UnityEditor;
 using UnityEngine;
 
 namespace Aim2Pro.AIGG.Workbench
 {
     internal static class WorkbenchSafe
     {
-        // Try call AIGG_LocalIntentEngine.RunToJson(string) -> string JSON
-        // Returns (success, jsonOrMessage)
+        // Try call Aim2Pro.AIGG.AIGG_LocalIntentEngine.RunToJson(string)
         public static (bool ok, string payload) TryParseLocal(string nl)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(nl)) return (false, "[WB] NL empty.");
-                var asms = AppDomain.CurrentDomain.GetAssemblies();
-                Type t = null;
-                MethodInfo m = null;
-
-                foreach (var a in asms)
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    // Preferred fully-qualified name
-                    t = a.GetType("Aim2Pro.AIGG.AIGG_LocalIntentEngine");
-                    if (t != null)
-                    {
-                        m = t.GetMethod("RunToJson", BindingFlags.Public | BindingFlags.Static);
-                        break;
-                    }
+                    var t = asm.GetType("Aim2Pro.AIGG.AIGG_LocalIntentEngine");
+                    if (t == null) continue;
+                    var m = t.GetMethod("RunToJson", BindingFlags.Public | BindingFlags.Static);
+                    if (m == null) break;
+                    var json = m.Invoke(null, new object[]{ nl }) as string ?? "";
+                    if (string.IsNullOrWhiteSpace(json)) return (false, "[WB] Local engine returned empty JSON.");
+                    return (true, json);
                 }
-                if (t == null || m == null)
-                    return (false, "[WB] Local intent engine not found (Aim2Pro.AIGG.AIGG_LocalIntentEngine.RunToJson).");
-
-                var json = m.Invoke(null, new object[] { nl }) as string ?? "";
-                if (string.IsNullOrEmpty(json))
-                    return (false, "[WB] Local engine returned empty JSON.");
-                return (true, json);
+                return (false, "[WB] Local intent engine not found (AIGG_LocalIntentEngine.RunToJson).");
             }
-            catch (Exception e)
-            {
-                return (false, "[WB] Local parse failed: " + e.Message);
-            }
+            catch (Exception e) { return (false, "[WB] Local parse failed: " + e.Message); }
         }
 
-        // Route canonical JSON to Pre-Merge Router if present. Returns status message.
-        public static string RouteJson(string json)
+        // Try forward to SpecPasteMergeWindow.OpenWithJson(json); else copy to clipboard
+        public static string RouteToPasteAndMerge(string json)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(json)) return "[WB] No JSON to route.";
-                var asms = AppDomain.CurrentDomain.GetAssemblies();
-                Type api = null;
-                MethodInfo route = null;
-
-                foreach (var a in asms)
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    api = a.GetType("Aim2Pro.AIGG.PreMergeRouterAPI");
-                    if (api != null)
+                    var t = asm.GetType("Aim2Pro.AIGG.SpecPasteMergeWindow");
+                    if (t == null) continue;
+                    var m = t.GetMethod("OpenWithJson", BindingFlags.Public | BindingFlags.Static);
+                    if (m != null)
                     {
-                        route = api.GetMethod("Route", new[] { typeof(string) });
-                        break;
+                        m.Invoke(null, new object[]{ json });
+                        return "[WB] Routed via SpecPasteMergeWindow.OpenWithJson";
                     }
                 }
-                if (api != null && route != null)
-                {
-                    route.Invoke(null, new object[] { json });
-                    return "[WB] Routed to PreMergeRouterAPI.Route.";
-                }
-
-                // Fallback: copy to clipboard so user can paste into Paste & Merge
-                GUIUtility.systemCopyBuffer = json;
-                return "[WB] Router missing. JSON copied to clipboard.";
+                EditorGUIUtility.systemCopyBuffer = json;
+                return "[WB] Paste & Merge not  JSON copied to clipboard.";found 
             }
             catch (Exception e)
             {
-                return "[WB] Route failed: " + e.Message;
+                EditorGUIUtility.systemCopyBuffer = json;
+                return "[WB] Route  JSON copied to clipboard: " + e.Message;failed 
             }
         }
     }

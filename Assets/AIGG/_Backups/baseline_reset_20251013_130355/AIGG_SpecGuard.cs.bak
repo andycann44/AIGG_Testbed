@@ -1,0 +1,37 @@
+using System.IO;
+using UnityEditor;
+using UnityEngine;
+namespace Aim2Pro.AIGG
+{
+    [InitializeOnLoad]
+    public static class AIGG_SpecGuard
+    {
+        static readonly string SpecDir = "Assets/AIGG/Spec";
+        static readonly string[] Files = new[]{ "intents.json","lexicon.json","macros.json","commands.json","fieldmap.json","registry.json","schema.json" };
+        static AIGG_SpecGuard(){ EnsureSpec(); }
+        [MenuItem("Window/Aim2Pro/Aigg/Run Spec Guard Now", priority = 100)]
+        public static void EnsureSpec()
+        {
+            if (!Directory.Exists(SpecDir)) Directory.CreateDirectory(SpecDir);
+            foreach (var f in Files)
+            {
+                var p = Path.Combine(SpecDir, f).Replace("\\","/");
+                if (!File.Exists(p)) { File.WriteAllText(p, GetDefaultFor(f)); Debug.Log("[SpecGuard] Created placeholder: " + p); }
+            }
+        }
+        static string GetDefaultFor(string name)
+        {
+            switch (name)
+            {
+                case "intents.json":   return "{ \"intents\": [] }";
+                case "lexicon.json":   return "{ \"lexicon\": [] }";
+                case "macros.json":    return "{ \"macros\": [] }";
+                case "commands.json":  return "{ \"commands\": [] }";
+                case "fieldmap.json":  return "{ \"fields\": [] }";
+                case "registry.json":  return "{ \"registry\": [] }";
+                case "schema.json":    return "{ \"schema\": {} }";
+            }
+            return "{}";
+        }
+    }
+}
