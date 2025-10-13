@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
@@ -10,6 +12,12 @@ namespace Aim2Pro.AIGG.Workbench
 {
     internal static class LocalIntentEngine
     {
+        private static readonly string[] SpecFiles = {
+            "intents.json","lexicon.json","macros.json","commands.json","fieldmap.json","registry.json","schema.json"
+        };
+
+        public static string[] GetRequiredSpecFiles() => (string[])SpecFiles.Clone();
+
         [Serializable] private class SpecOp { public string op; public string path; public string value; }
         [Serializable] private class SpecIntent { public string name; public string regex; public List<SpecOp> ops; }
         [Serializable] private class SpecRoot { public List<SpecIntent> intents; }
@@ -43,6 +51,96 @@ namespace Aim2Pro.AIGG.Workbench
                 return true;
             }
             return false;
+        }
+
+        public static bool TryReadSpec(string specDir, out string[] present, out string[] missing)
+        {
+            present = Array.Empty<string>(); missing = Array.Empty<string>();
+            if (string.IsNullOrEmpty(specDir) || !Directory.Exists(specDir)) { missing = SpecFiles; return false; }
+            var existing = SpecFiles.Where(f => File.Exists(Path.Combine(specDir, f))).ToArray();
+            var missingFiles = SpecFiles.Except(existing).ToArray();
+            present = existing; missing = missingFiles;
+            return missingFiles.Length == 0;
+        }
+
+        public static string Normalize(string nl)
+        {
+            if (string.IsNullOrWhiteSpace(nl)) return string.Empty;
+            return Regex.Replace(nl.Trim().ToLowerInvariant(), @"\s+", " ");
+        }
+
+        public static bool LooksLikeScenePlan(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            var lower = json.ToLowerInvariant();
+            return lower.Contains("\"sceneplan\"") || lower.Contains("\"scenes\"") || lower.Contains("\"nodes\"");
+        }
+
+        /// <summary>
+        /// Minimal NL heuristic to produce canonical track JSON without relying on intents.
+        /// </summary>
+        public static bool TryConvertNLToCanonical(string nl, out string canonicalJson, out string[] unmatched, out string[] notes)
+        {
+            canonicalJson = string.Empty;
+            unmatched = Array.Empty<string>();
+            notes = Array.Empty<string>();
+
+            var normalized = Normalize(nl);
+            if (string.IsNullOrEmpty(normalized)) { unmatched = new[] { "empty_nl" }; return false; }
+
+            int length = 0, width = 0, curveRows = 0;
+            double missing = 0.0, gaps = 0.0;
+            const double tileSpacing = 1.0;
+            string curveSide = null;
+
+            var matchLengthWidth = Regex.Match(normalized, @"\b(\d+)\s*m\s*(?:x|by)\s*(\d+)\s*m\b");
+            if (matchLengthWidth.Success) {
+                length = ParseInt(matchLengthWidth.Groups[1].Value);
+                width = ParseInt(matchLengthWidth.Groups[2].Value);
+            } else {
+                var lengthMatch = Regex.Match(normalized, @"\b(\d+)\s*m\b");
+                if (lengthMatch.Success) length = ParseInt(lengthMatch.Groups[1].Value);
+                var widthMatch = Regex.Match(normalized, @"\bwidth\s*(\d+)\s*m\b");
+                if (widthMatch.Success) width = ParseInt(widthMatch.Groups[1].Value);
+            }
+
+            var missingMatch = Regex.Match(normalized, @"\b(\d+)\s*%\s*(?:tiles?\s*missing|missing\s*tiles?)\b");
+            if (missingMatch.Success) missing = ParseInt(missingMatch.Groups[1].Value) / 100.0;
+
+            var gapMatch = Regex.Match(normalized, @"\b(\d+)\s*%\s*gaps?\b");
+            if (gapMatch.Success) gaps = ParseInt(gapMatch.Groups[1].Value) / 100.0;
+
+            var curveMatch = Regex.Match(normalized, @"\b(left|right)\s+curve\s+over\s+(\d+)\s+rows\b");
+            if (curveMatch.Success) {
+                curveSide = curveMatch.Groups[1].Value;
+                curveRows = ParseInt(curveMatch.Groups[2].Value);
+            }
+
+            var missingFields = new List<string>();
+            var noteList = new List<string>();
+            if (length <= 0) missingFields.Add("length");
+            if (width <= 0) { width = 3; noteList.Add("defaulted width=3"); }
+
+            if (missingFields.Count > 0) {
+                unmatched = missingFields.ToArray();
+                notes = noteList.ToArray();
+                return false;
+            }
+
+            var ci = CultureInfo.InvariantCulture;
+            var builder = new StringBuilder();
+            builder.Append("{\"track\":{");
+            builder.AppendFormat(ci, "\"length\":{0},\"width\":{1},\"tileSpacing\":{2}", length, width, tileSpacing);
+            if (missing > 0) builder.AppendFormat(ci, ",\"missingTileChance\":{0}", Clamp01(missing));
+            if (gaps > 0) builder.AppendFormat(ci, ",\"gapChance\":{0}", Clamp01(gaps));
+            if (!string.IsNullOrEmpty(curveSide) && curveRows > 0)
+                builder.AppendFormat(ci, ",\"curve\":{{\"side\":\"{0}\",\"rows\":{1}}}", curveSide, curveRows);
+            builder.Append(",\"killzoneY\":-5}");
+            builder.Append('}');
+
+            canonicalJson = builder.ToString();
+            notes = noteList.ToArray();
+            return true;
         }
 
         // ----- Intents loading -----
