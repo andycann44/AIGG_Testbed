@@ -771,7 +771,7 @@ namespace Aim2Pro.AIGG.Workbench
           try
           {
             var patchJson = File.ReadAllText(wrote);
-            global::Aim2Pro.AIGG.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+            global::Aim2Pro.AIGG.PreMergeRouterAPI.Route(patchJson, true);
             ShowNotification(new GUIContent("AI patch created → Pre-Merge Router opened"));
             return 0;
           }
@@ -785,7 +785,7 @@ namespace Aim2Pro.AIGG.Workbench
         if (!string.IsNullOrEmpty(patch) && File.Exists(patch))
         {
           var patchJson = File.ReadAllText(patch);
-          global::Aim2Pro.AIGG.PreMergeRouterWindow.ReceiveFromOpenAI(patchJson, true);
+          global::Aim2Pro.AIGG.PreMergeRouterAPI.Route(patchJson, true);
           ShowNotification(new GUIContent("AI patch found → Pre-Merge Router opened"));
           return 0;
         }
