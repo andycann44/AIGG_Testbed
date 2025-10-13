@@ -8,6 +8,9 @@ using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
+  // Open either way:
+  //   Window → Aim2Pro → Aigg → Workbench (Diagnostics Alias)
+  //   Window → Aim2Pro → Aigg → Diagnostics (Full)
   public class DiagnosticsAsWorkbench : EditorWindow
   {
     private string _nl = "";
@@ -15,16 +18,14 @@ namespace Aim2Pro.AIGG
     private string _lastJson = "";
     private readonly List<string> _matched = new List<string>();
     private readonly List<string> _unmatched = new List<string>();
-    private Vector2 _scrollL, _scrollR, _scrollFix;
-    private bool _autoCorrectBeforeScan = true;
-    private List<NL_Correction.Suggestion> _fixes = new List<NL_Correction.Suggestion>();
+    private Vector2 _scrollL, _scrollR;
 
     private static readonly string SpecDir = "Assets/AIGG/Spec";
 
     [MenuItem("Window/Aim2Pro/Aigg/Diagnostics (Full)", priority = 120)]
     public static void ShowDiag() {
       var w = GetWindow<DiagnosticsAsWorkbench>("Diagnostics");
-      w.minSize = new Vector2(860, 560);
+      w.minSize = new Vector2(800, 520);
       w.Show();
     }
 
@@ -38,33 +39,8 @@ namespace Aim2Pro.AIGG
 
       using (new EditorGUILayout.HorizontalScope())
       {
-        _autoCorrectBeforeScan = EditorGUILayout.ToggleLeft("Auto-correct typos before Scan/Parse", _autoCorrectBeforeScan, GUILayout.Width(270));
-        if (GUILayout.Button("Suggest fixes", GUILayout.Height(24))) SuggestFixes();
-        if (GUILayout.Button("Apply fixes", GUILayout.Height(24))) ApplyFixes();
-      }
-
-      // Fixes list
-      if (_fixes != null && _fixes.Count > 0)
-      {
-        using (new EditorGUILayout.VerticalScope("box"))
-        {
-          EditorGUILayout.LabelField("Suggested fixes ("+_fixes.Count+")", EditorStyles.boldLabel);
-          using (var s = new EditorGUILayout.ScrollViewScope(_scrollFix, GUILayout.Height(110)))
-          {
-            _scrollFix = s.scrollPosition;
-            for (int i=0;i<_fixes.Count;i++)
-            {
-              var f = _fixes[i];
-              EditorGUILayout.LabelField("• " + f.Original + " → " + f.Replacement + "  [" + f.Reason + "]");
-            }
-          }
-        }
-      }
-
-      using (new EditorGUILayout.HorizontalScope())
-      {
-        if (GUILayout.Button("Parse NL (local)", GUILayout.Height(26))) { if (_autoCorrectBeforeScan) { SuggestFixes(); ApplyFixes(); } RunLocal(); }
-        if (GUILayout.Button("Scan (Matched / Unmatched)", GUILayout.Height(26))) { if (_autoCorrectBeforeScan) { SuggestFixes(); ApplyFixes(); } ScanNow(); }
+        if (GUILayout.Button("Parse NL (local)", GUILayout.Height(26))) RunLocal();
+        if (GUILayout.Button("Scan (Matched / Unmatched)", GUILayout.Height(26))) ScanNow();
         if (GUILayout.Button("Self-Fix (Local Patch → Router)", GUILayout.Height(26)))
           PreMergeRouterAPI.Route(BuildLocalPatchJSON(_unmatched));
         if (GUILayout.Button("Self-Fix (AI → Router)", GUILayout.Height(26)))
@@ -113,23 +89,11 @@ namespace Aim2Pro.AIGG
       _lastJson = EditorGUILayout.TextArea(_lastJson ?? "", GUILayout.Height(140));
     }
 
-    // === Correction actions ===
-    private void SuggestFixes()
-    {
-      _fixes = NL_Correction.Suggest(_nl);
-      _status = (_fixes.Count == 0) ? "No changes suggested." : ("Suggested " + _fixes.Count + " change(s).");
-    }
-
-    private void ApplyFixes()
-    {
-      if (_fixes == null || _fixes.Count == 0) { _status = "No fixes to apply."; return; }
-      _nl = NL_Correction.Apply(_nl, _fixes);
-      _status = "Applied " + _fixes.Count + " change(s).";
-    }
-
     // === Workbench-equivalent actions ===
+
     private void RunLocal()
     {
+      // Prefer real engine: Aim2Pro.AIGG.AIGG_LocalIntentEngine.RunToJson(string)
       try {
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies()) {
           var t = asm.GetType("Aim2Pro.AIGG.AIGG_LocalIntentEngine");
@@ -140,6 +104,7 @@ namespace Aim2Pro.AIGG
           _status = string.IsNullOrEmpty(_lastJson) ? "Local engine returned empty JSON." : "Local parse OK.";
           return;
         }
+        // Fallback: build a simple envelope so the pipeline stays alive
         _lastJson = "{\"nl\":\""+Esc(_nl)+"\",\"note\":\"local engine not found\"}";
         _status = "Local engine missing; produced fallback JSON.";
       } catch (Exception e) {
