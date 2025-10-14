@@ -463,7 +463,7 @@ namespace Aim2Pro.AIGG
                 var lines = pasted.Split(new[] {'\n','\r'}, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var raw in lines)
                 {
-                    var line = raw.trim();
+                    var line = raw.Trim();
                     line = line.Trim();
                     if (line.Length==0 || line.StartsWith("#")) continue;
                     var idx = line.IndexOf("=>", StringComparison.Ordinal);
