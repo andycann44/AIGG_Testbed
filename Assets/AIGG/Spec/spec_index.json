@@ -1,0 +1,19 @@
+{
+  "files": [
+    "lexicon.json",
+    "fieldmap.json",
+    "intents.json",
+    "schema.json",
+    "registry.json",
+    "commands.json",
+    "macros.json",
+    "defaults.json",
+    "patterns.json",
+    "validators.json",
+    "types.json",
+    "presets.json",
+    "generators.json",
+    "rules.json",
+    "aliases.json"
+  ]
+}
