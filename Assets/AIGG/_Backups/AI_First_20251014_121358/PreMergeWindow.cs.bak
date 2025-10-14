@@ -26,32 +26,28 @@ namespace Aim2Pro.AIGG.PreMerge
     string _issues = "";
     string _missing = "";
     string _canonical = "{ }";
-    bool   _blockPreview = false;   // hide preview + disable Send when true
 
     Vector2 sv1, sv2, sv3, sv4;
 
     // AI settings
     string apiKey = "";
     string model = "gpt-4o-mini";
-    bool useAI = true;
-    bool aiFirst = false;
+    bool useAI = false;
 
-    // Folders
+    // AI output folder
     static readonly string AIOutRoot = "Assets/AIGG/AIOut";
     void EnsureDir(string p) { var d = System.IO.Path.GetDirectoryName(p); if (!Directory.Exists(d)) Directory.CreateDirectory(d); }
     string Stamp() => DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
 
     void LoadPrefs() {
-      apiKey  = EditorPrefs.GetString("AIGG_OpenAI_API_Key", "");
-      model   = EditorPrefs.GetString("AIGG_OpenAI_Model", "gpt-4o-mini");
-      useAI   = EditorPrefs.GetBool("AIGG_OpenAI_Use", true);
-      aiFirst = EditorPrefs.GetBool("AIGG_OpenAI_AIFirst", false);
+      apiKey = EditorPrefs.GetString("AIGG_OpenAI_API_Key", "");
+      model  = EditorPrefs.GetString("AIGG_OpenAI_Model", "gpt-4o-mini");
+      useAI  = EditorPrefs.GetBool("AIGG_OpenAI_Use", false);
     }
     void SavePrefs() {
       EditorPrefs.SetString("AIGG_OpenAI_API_Key", apiKey ?? "");
       EditorPrefs.SetString("AIGG_OpenAI_Model", model ?? "gpt-4o-mini");
       EditorPrefs.SetBool("AIGG_OpenAI_Use", useAI);
-      EditorPrefs.SetBool("AIGG_OpenAI_AIFirst", aiFirst);
     }
 
     void OnGUI() {
@@ -65,10 +61,8 @@ namespace Aim2Pro.AIGG.PreMerge
         if (GUILayout.Button("Run Pre-Merge")) RunPreMerge();
         if (GUILayout.Button("Local Fix Only")) RunPreMerge(localOnly:true);
         GUILayout.FlexibleSpace();
-        using (new EditorGUI.DisabledScope(_blockPreview || !string.IsNullOrEmpty(_missing))) {
-          if (GUILayout.Button("Send → Paste & Merge")) {
-            PreMergeRouterAPI.Route(_canonical);
-          }
+        if (GUILayout.Button("Send → Paste & Merge")) {
+          PreMergeRouterAPI.Route(_canonical);
         }
       }
 
@@ -84,22 +78,18 @@ namespace Aim2Pro.AIGG.PreMerge
       EditorGUILayout.EndScrollView();
 
       EditorGUILayout.LabelField("Canonical JSON (preview)", EditorStyles.boldLabel);
-      if (_blockPreview || !string.IsNullOrEmpty(_missing)) {
-        EditorGUILayout.HelpBox("Canonical JSON hidden until missing items are resolved.", MessageType.Warning);
-      }
       sv4 = EditorGUILayout.BeginScrollView(sv4, GUILayout.MinHeight(160));
-      EditorGUILayout.TextArea((_blockPreview || !string.IsNullOrEmpty(_missing)) ? "" : _canonical, GUILayout.ExpandHeight(true));
+      EditorGUILayout.TextArea(_canonical, GUILayout.ExpandHeight(true));
       EditorGUILayout.EndScrollView();
 
       EditorGUILayout.Space();
       using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox)) {
-        EditorGUILayout.LabelField("AI Assist", EditorStyles.boldLabel);
-        useAI   = EditorGUILayout.ToggleLeft("Enable OpenAI", useAI);
-        aiFirst = EditorGUILayout.ToggleLeft("AI-first (skip local extraction)", aiFirst);
-        apiKey  = EditorGUILayout.PasswordField("API Key", apiKey);
-        model   = EditorGUILayout.TextField("Model", string.IsNullOrEmpty(model) ? "gpt-4o-mini" : model);
+        EditorGUILayout.LabelField("AI Assist (optional)", EditorStyles.boldLabel);
+        useAI = EditorGUILayout.ToggleLeft("Use OpenAI if local checks still missing", useAI);
+        apiKey = EditorGUILayout.PasswordField("API Key", apiKey);
+        model  = EditorGUILayout.TextField("Model", string.IsNullOrEmpty(model) ? "gpt-4o-mini" : model);
         using (new EditorGUILayout.HorizontalScope()) {
-          if (GUILayout.Button("Save Settings", GUILayout.Width(140))) SavePrefs();
+          if (GUILayout.Button("Save AI Settings", GUILayout.Width(160))) SavePrefs();
           if (GUILayout.Button("Ask AI Now", GUILayout.Width(120))) AskAI();
           if (GUILayout.Button("Reveal AI Output Folder", GUILayout.Width(200))) EditorUtility.RevealInFinder(AIOutRoot);
         }
@@ -107,63 +97,41 @@ namespace Aim2Pro.AIGG.PreMerge
     }
 
     void RunPreMerge(bool localOnly=false) {
-      _normalized = NormalizeLight(_nl);
-
-      if (useAI && aiFirst && !localOnly) { AskAI(); return; }
-
       var engine = new PreMergeEngine();
-      var res = engine.Process(_normalized);
+      var res = engine.Process(_nl);
+      _normalized = res.normalized;
+
+      var sb = new StringBuilder();
+      foreach (var i in res.issues) sb.AppendLine("• " + i);
+      _issues = sb.ToString().Trim();
+
+      var mb = new StringBuilder();
+      foreach (var m in res.missing) mb.AppendLine("• " + m);
+      _missing = mb.ToString().Trim();
 
       _canonical = res.canonicalJson;
-      _issues    = JoinBullets(res.issues);
 
-      // HARD VALIDATION (guarantee hiding + explicit curve message)
-      var hardMiss = HardValidate(_nl, _canonical);
-      var allMiss  = new List<string>();
-      if (res.missing != null) allMiss.AddRange(res.missing);
-      allMiss.AddRange(hardMiss);
-      _missing      = JoinBullets(Dedup(allMiss));
-      _blockPreview = !string.IsNullOrEmpty(_missing);
+      if (!localOnly && useAI && res.missing.Count > 0) {
+        AskAI();
+      }
     }
 
-    string NormalizeLight(string s) {
-      if (string.IsNullOrEmpty(s)) return "";
-      s = s.Trim();
-      s = Regex.Replace(s, "\\s+", " ");
-      s = Regex.Replace(s, "\\s*[,;]+\\s*", ", ");
-      return s;
-    }
-
-    // ---------- AI ----------
     void AskAI() {
-      if (!useAI) { ShowNotification(new GUIContent("Enable OpenAI first.")); return; }
       if (string.IsNullOrEmpty(apiKey)) { ShowNotification(new GUIContent("Set API key first.")); return; }
 
-      var system =
-        "You are a strict JSON generator for a Unity editor tool called AIGG. " +
-        "If multiple spec files must be produced, return an envelope: " +
-        "{\"files\":{\"lexicon.json\":{...},\"fieldmap.json\":{...},\"intents.json\":{...},\"schema.json\":{...},\"registry.json\":{...},\"commands.json\":{...},\"macros.json\":{...}}}. " +
-        "If only one object is needed, return that single JSON object. " +
-        "Do NOT include code fences or comments. Output JSON only.";
-
-      var user =
-        "NATURAL LANGUAGE:\n" + _nl + "\n\n" +
-        "CURRENT (if any):\n" + _canonical + "\n\n" +
-        "TASK: Produce corrected/complete JSON. Include curve steps if NL asks for them. Output JSON only.";
+      var system = "You are a strict JSON generator for Unity editor tooling. " +
+                   "If multiple spec files are needed, return this envelope: " +
+                   "{\"files\":{\"lexicon.json\":{...},\"fieldmap.json\":{...}}}. " +
+                   "Otherwise return a single JSON object. No code fences, no comments.";
+      var user   = "NL:\n" + _nl + "\n\nCurrent canonical JSON (if present):\n" + _canonical + "\n\nReturn corrected/complete JSON only.";
 
       try {
         var json = OpenAIChat(apiKey, model, system, user);
         if (!string.IsNullOrEmpty(json)) {
           _canonical = json;
-
-          // Re-validate: hide/disable if missing
-          var postMissing = HardValidate(_nl, _canonical);
-          _missing = JoinBullets(postMissing);
-          _blockPreview = postMissing.Count > 0;
-
-          var saved = TrySplitAndSaveAIOutput(json, routeFirst: postMissing.Count == 0);
-          if (saved > 1 && postMissing.Count == 0) {
-            _issues = (_issues + "\n").Trim() + $"Saved {saved} AI files to {AIOutRoot}; first opened in Paste & Merge.";
+          var saved = TrySplitAndSaveAIOutput(json, routeFirst:true);
+          if (saved > 1) {
+            _issues = (_issues + "\n").Trim() + $"Saved {saved} AI files in {AIOutRoot}. Opened the first in Paste & Merge.";
           }
           Repaint();
           ShowNotification(new GUIContent("AI completed."));
@@ -173,74 +141,6 @@ namespace Aim2Pro.AIGG.PreMerge
       }
     }
 
-    // ---------- Hard validation (always run before showing/allowing Send) ----------
-    List<string> HardValidate(string nl, string canonicalJson) {
-      var miss = new List<string>();
-
-      // Parse canonical
-      if (string.IsNullOrWhiteSpace(canonicalJson)) { miss.Add("no canonical json"); return miss; }
-      object root;
-      if (!MiniJSON.TryDeserialize(canonicalJson, out root) || !(root is Dictionary<string,object> d)) {
-        miss.Add("canonical structure (expected object)"); return miss;
-      }
-
-      // Helpers
-      bool HasPath(Dictionary<string,object> obj, string[] path) {
-        object cur = obj;
-        foreach (var seg in path) {
-          if (cur is Dictionary<string,object> dd) {
-            if (!dd.TryGetValue(seg, out cur)) return false;
-          } else return false;
-        }
-        return cur != null;
-      }
-      bool MentionsCurve(string s) {
-        return Regex.IsMatch(s, "\\b(left|right)\\b.*\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase)
-            || Regex.IsMatch(s, "\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(left|right)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase);
-      }
-
-      // Always require dims
-      if (!HasPath(d, new[]{"track","length"})) miss.Add("$.track.length");
-      if (!HasPath(d, new[]{"track","width"}))  miss.Add("$.track.width");
-
-      // Curve expectation
-      if (MentionsCurve(nl)) {
-        bool hasPlan = d.TryGetValue("plan", out var p) && p is List<object> arr && arr.Count>0;
-        bool hasCurve=false, okSide=false, okDeg=false, okRows=false;
-        if (hasPlan) {
-          foreach (var o in (List<object>)p) {
-            var item = o as Dictionary<string,object>; if (item==null) continue;
-            if (item.TryGetValue("action", out var act)
-                && string.Equals(act?.ToString(),"curveRowsOver",StringComparison.OrdinalIgnoreCase)) {
-              hasCurve = true;
-              if (item.TryGetValue("args", out var args) && args is Dictionary<string,object> ad) {
-                okSide = ad.ContainsKey("side");
-                okDeg  = ad.ContainsKey("deg");
-                okRows = ad.ContainsKey("rows");
-              }
-              break;
-            }
-          }
-        }
-        if (!hasCurve || !(okSide && okDeg && okRows))
-          miss.Add("curve step (plan[].action='curveRowsOver')");
-      }
-      return miss;
-    }
-
-    // ---------- utils ----------
-    string JoinBullets(List<string> xs){
-      if (xs==null || xs.Count==0) return "";
-      var sb=new StringBuilder();
-      foreach (var x in xs) sb.AppendLine("• " + x);
-      return sb.ToString().Trim();
-    }
-    List<string> Dedup(List<string> xs){
-      var set=new HashSet<string>(xs ?? new List<string>());
-      return new List<string>(set);
-    }
-
-    // split/save AI envelope & optionally route first file
     int TrySplitAndSaveAIOutput(string text, bool routeFirst = true)
     {
       if (string.IsNullOrWhiteSpace(text)) return 0;
@@ -293,7 +193,6 @@ namespace Aim2Pro.AIGG.PreMerge
       return 1;
     }
 
-    // tiny OpenAI client
     string OpenAIChat(string key, string model, string system, string user) {
       var url = "https://api.openai.com/v1/chat/completions";
       var req = (HttpWebRequest)WebRequest.Create(url);

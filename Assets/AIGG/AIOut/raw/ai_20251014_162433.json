@@ -1,0 +1,19 @@
+﻿{
+  "track": {
+    "length": 50,
+    "width": 7,
+    "tileSpacing": 1,
+    "killzoneY": -5,
+    "obstacles": []
+  },
+  "plan": [
+    {
+      "action": "curveRowsOver",
+      "args": {
+        "side": "left",
+        "deg": 45,
+        "rows": 10
+      }
+    }
+  ]
+}

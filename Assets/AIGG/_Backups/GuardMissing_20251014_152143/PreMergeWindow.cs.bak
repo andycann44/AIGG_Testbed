@@ -26,18 +26,19 @@ namespace Aim2Pro.AIGG.PreMerge
     string _issues = "";
     string _missing = "";
     string _canonical = "{ }";
-    bool   _blockPreview = false;   // hide preview + disable Send when true
+    bool   _blockPreview = false;
 
     Vector2 sv1, sv2, sv3, sv4;
 
     // AI settings
     string apiKey = "";
     string model = "gpt-4o-mini";
-    bool useAI = true;
-    bool aiFirst = false;
+    bool useAI = true;       // enable OpenAI
+    bool aiFirst = false;    // optional: prefer AI
 
-    // Folders
+    // AI output folder
     static readonly string AIOutRoot = "Assets/AIGG/AIOut";
+    static readonly string SpecRoot  = "Assets/AIGG/Spec";
     void EnsureDir(string p) { var d = System.IO.Path.GetDirectoryName(p); if (!Directory.Exists(d)) Directory.CreateDirectory(d); }
     string Stamp() => DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
 
@@ -109,21 +110,18 @@ namespace Aim2Pro.AIGG.PreMerge
     void RunPreMerge(bool localOnly=false) {
       _normalized = NormalizeLight(_nl);
 
-      if (useAI && aiFirst && !localOnly) { AskAI(); return; }
+      if (useAI && aiFirst && !localOnly) {
+        AskAI();
+        return;
+      }
 
       var engine = new PreMergeEngine();
       var res = engine.Process(_normalized);
 
-      _canonical = res.canonicalJson;
-      _issues    = JoinBullets(res.issues);
-
-      // HARD VALIDATION (guarantee hiding + explicit curve message)
-      var hardMiss = HardValidate(_nl, _canonical);
-      var allMiss  = new List<string>();
-      if (res.missing != null) allMiss.AddRange(res.missing);
-      allMiss.AddRange(hardMiss);
-      _missing      = JoinBullets(Dedup(allMiss));
-      _blockPreview = !string.IsNullOrEmpty(_missing);
+      _canonical   = res.canonicalJson;
+      _issues      = JoinBullets(res.issues);
+      _missing     = JoinBullets(res.missing);
+      _blockPreview = res.missing != null && res.missing.Count > 0;
     }
 
     string NormalizeLight(string s) {
@@ -156,8 +154,8 @@ namespace Aim2Pro.AIGG.PreMerge
         if (!string.IsNullOrEmpty(json)) {
           _canonical = json;
 
-          // Re-validate: hide/disable if missing
-          var postMissing = HardValidate(_nl, _canonical);
+          // Re-validate: if NL mentions curve but JSON lacks it, mark missing → hide preview
+          var postMissing = ValidateAgainstNL(_nl, _canonical);
           _missing = JoinBullets(postMissing);
           _blockPreview = postMissing.Count > 0;
 
@@ -173,74 +171,43 @@ namespace Aim2Pro.AIGG.PreMerge
       }
     }
 
-    // ---------- Hard validation (always run before showing/allowing Send) ----------
-    List<string> HardValidate(string nl, string canonicalJson) {
-      var miss = new List<string>();
+    // If NL implies curve but canonical lacks it, return a "curve missing"
+    List<string> ValidateAgainstNL(string nl, string canonicalJson) {
+      var list = new List<string>();
+      bool mentionsCurve =
+        Regex.IsMatch(nl, "\\b(left|right)\\b.*\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase) ||
+        Regex.IsMatch(nl, "\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(left|right)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase);
 
-      // Parse canonical
-      if (string.IsNullOrWhiteSpace(canonicalJson)) { miss.Add("no canonical json"); return miss; }
-      object root;
-      if (!MiniJSON.TryDeserialize(canonicalJson, out root) || !(root is Dictionary<string,object> d)) {
-        miss.Add("canonical structure (expected object)"); return miss;
+      if (string.IsNullOrWhiteSpace(canonicalJson)) { list.Add("no canonical json"); return list; }
+
+      object obj;
+      if (!MiniJSON.TryDeserialize(canonicalJson, out obj) || !(obj is Dictionary<string,object> d)) {
+        list.Add("invalid canonical json"); return list;
       }
 
-      // Helpers
-      bool HasPath(Dictionary<string,object> obj, string[] path) {
-        object cur = obj;
-        foreach (var seg in path) {
-          if (cur is Dictionary<string,object> dd) {
-            if (!dd.TryGetValue(seg, out cur)) return false;
-          } else return false;
-        }
-        return cur != null;
-      }
-      bool MentionsCurve(string s) {
-        return Regex.IsMatch(s, "\\b(left|right)\\b.*\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase)
-            || Regex.IsMatch(s, "\\b(\\d+)\\s*(?:deg|degree|degrees)\\b.*\\b(left|right)\\b.*\\b(\\d+)\\s*rows?\\b", RegexOptions.IgnoreCase);
-      }
-
-      // Always require dims
-      if (!HasPath(d, new[]{"track","length"})) miss.Add("$.track.length");
-      if (!HasPath(d, new[]{"track","width"}))  miss.Add("$.track.width");
-
-      // Curve expectation
-      if (MentionsCurve(nl)) {
-        bool hasPlan = d.TryGetValue("plan", out var p) && p is List<object> arr && arr.Count>0;
-        bool hasCurve=false, okSide=false, okDeg=false, okRows=false;
-        if (hasPlan) {
-          foreach (var o in (List<object>)p) {
-            var item = o as Dictionary<string,object>; if (item==null) continue;
-            if (item.TryGetValue("action", out var act)
-                && string.Equals(act?.ToString(),"curveRowsOver",StringComparison.OrdinalIgnoreCase)) {
-              hasCurve = true;
-              if (item.TryGetValue("args", out var args) && args is Dictionary<string,object> ad) {
-                okSide = ad.ContainsKey("side");
-                okDeg  = ad.ContainsKey("deg");
-                okRows = ad.ContainsKey("rows");
-              }
-              break;
-            }
+      bool hasCurve = false;
+      if (d.TryGetValue("plan", out var p) && p is List<object> arr) {
+        foreach (var o in arr) {
+          var dd = o as Dictionary<string,object>;
+          if (dd!=null && dd.TryGetValue("action", out var a)
+              && string.Equals(a?.ToString(), "curveRowsOver", StringComparison.OrdinalIgnoreCase)) {
+            hasCurve = true; break;
           }
         }
-        if (!hasCurve || !(okSide && okDeg && okRows))
-          miss.Add("curve step (plan[].action='curveRowsOver')");
       }
-      return miss;
+      if (mentionsCurve && !hasCurve) list.Add("curve step (plan[].action='curveRowsOver')");
+
+      return list;
     }
 
-    // ---------- utils ----------
     string JoinBullets(List<string> xs){
       if (xs==null || xs.Count==0) return "";
       var sb=new StringBuilder();
       foreach (var x in xs) sb.AppendLine("• " + x);
       return sb.ToString().Trim();
     }
-    List<string> Dedup(List<string> xs){
-      var set=new HashSet<string>(xs ?? new List<string>());
-      return new List<string>(set);
-    }
 
-    // split/save AI envelope & optionally route first file
+    // --- split/save envelope & optionally route the first file ---
     int TrySplitAndSaveAIOutput(string text, bool routeFirst = true)
     {
       if (string.IsNullOrWhiteSpace(text)) return 0;
@@ -293,7 +260,7 @@ namespace Aim2Pro.AIGG.PreMerge
       return 1;
     }
 
-    // tiny OpenAI client
+    // --- minimal OpenAI client ---
     string OpenAIChat(string key, string model, string system, string user) {
       var url = "https://api.openai.com/v1/chat/completions";
       var req = (HttpWebRequest)WebRequest.Create(url);
