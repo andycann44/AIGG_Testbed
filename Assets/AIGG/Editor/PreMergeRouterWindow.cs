@@ -33,7 +33,7 @@ namespace Aim2Pro.AIGG {
     private string Normalize(string s) {
       s = (s ?? "").Replace("\r"," ");
       s = Regex.Replace(s, "\\s+", " ").Trim().ToLowerInvariant();
-      s = s.Replace(" m", "m"); // normalize "6 m" -> "6m"
+      s = Regex.Replace(s, @"(?<=\d)\s*m\b", "m"); // join only number+m
       return s;
     }
     private int ExtractInt(string s, string pattern) { var m = Regex.Match(s, pattern); return m.Success ? int.Parse(m.Groups[1].Value) : 0; }
@@ -41,6 +41,7 @@ namespace Aim2Pro.AIGG {
 
     private void RunLocalExtract() {
       normalized = Normalize(nlInput);
+      normalizedDisplay = Regex.Replace(normalized, @"\b(tiles)\s+(missing)\b", "$1/$2");
       int length = ExtractInt(normalized, @"\b(\d+)\s*m\b");
       int width  = ExtractInt(normalized, @"\bby\s+(\d+)\s*m\b");
       float missing = ExtractFloat(normalized, @"\b(\d+)\s*%\s*tiles?\s*missing\b");
@@ -146,7 +147,7 @@ namespace Aim2Pro.AIGG {
 
       GUILayout.Space(6);
       GUILayout.Label("Normalized");
-      EditorGUILayout.TextArea(normalized, GUILayout.MinHeight(28));
+      EditorGUILayout.TextArea(normalizedDisplay, GUILayout.MinHeight(28));
 
       GUILayout.Label("Issues / Missing");
       EditorGUILayout.TextArea(string.IsNullOrEmpty(issuesText) ? "(none)" : issuesText, GUILayout.MinHeight(60));
