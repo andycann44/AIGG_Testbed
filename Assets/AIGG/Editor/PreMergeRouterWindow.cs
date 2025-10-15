@@ -3,14 +3,15 @@ using UnityEditor;
 using UnityEngine;
 using System;
 using System.Linq;
-using UnityEngine.Networking;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 
 namespace Aim2Pro.AIGG {
   public class PreMergeRouterWindow : EditorWindow {
+    // --- state ---
     private string nlInput = "";
     private string normalized = "";
+    private string normalizedDisplay = "";
     private string issuesText = "";
     private string canonicalRaw = "";
     private string canonicalShown = "";
@@ -18,11 +19,13 @@ namespace Aim2Pro.AIGG {
     private readonly List<string> unmatched = new List<string>();
     private readonly List<string> issues = new List<string>();
 
+    // AI
     private bool enableOpenAI = false;
     private bool aiFirst = false;
     private bool autoAiFix = false;
     private string apiKey = "";
     private string model = "gpt-4o-mini";
+    private bool aiAlreadyTried = false;
 
     [MenuItem("Window/Aim2Pro/Aigg/Pre-Merge")]
     public static void Open() {
@@ -32,12 +35,21 @@ namespace Aim2Pro.AIGG {
       w.Show();
     }
 
-    void OnEnable(){ apiKey = Aim2Pro.AIGG.AIGGEditorPrefs.LoadKey(); model = Aim2Pro.AIGG.AIGGEditorPrefs.LoadModel(); autoAiFix = Aim2Pro.AIGG.AIGGEditorPrefs.LoadAuto(); }
+    void OnEnable() {
+      // load persisted AI settings (no-op if class absent)
+      try {
+        apiKey = AIGGEditorPrefs.LoadKey();
+        model = AIGGEditorPrefs.LoadModel();
+        autoAiFix = AIGGEditorPrefs.LoadAuto();
+      } catch {}
+    }
 
+    // --- helpers ---
     private string Normalize(string s) {
       s = (s ?? "").Replace("\r"," ");
       s = Regex.Replace(s, "\\s+", " ").Trim().ToLowerInvariant();
-      s = Regex.Replace(s, @"(?<=\d)\s*m\b", "m"); // join only number+m
+      // join ONLY number + m (e.g., "6 m" -> "6m")
+      s = Regex.Replace(s, @"(?<=\d)\s*m\b", "m");
       return s;
     }
     private int ExtractInt(string s, string pattern) { var m = Regex.Match(s, pattern); return m.Success ? int.Parse(m.Groups[1].Value) : 0; }
@@ -46,15 +58,19 @@ namespace Aim2Pro.AIGG {
     private void RunLocalExtract() {
       normalized = Normalize(nlInput);
       normalizedDisplay = Regex.Replace(normalized, @"\b(tiles)\s+(missing)\b", "$1/$2");
+
       int length = ExtractInt(normalized, @"\b(\d+)\s*m\b");
       int width  = ExtractInt(normalized, @"\bby\s+(\d+)\s*m\b");
       float missing = ExtractFloat(normalized, @"\b(\d+)\s*%\s*tiles?\s*missing\b");
-      if (length <= 0 && width <= 0 && missing <= 0) { canonicalRaw = ""; return; }
+
+      canonicalRaw = "";
+      if (length <= 0 && width <= 0 && missing <= 0) return;
 
       string missingLine = missing > 0 ? (",\n    \"missingTileChance\": " + missing) : "";
       string plan = "[]";
       if (Regex.IsMatch(normalized, @"\bcurve\b|\brows\b|\bdeg(rees?)?\b|\bleft\b|\bright\b")) {
-        plan = "[ { \"action\": \"curveRowsOver\", \"args\": { \"side\": \"left\", \"deg\": 15, \"rows\": 10 } } ]";
+        // simple local inference for demo; spec will enforce via commands.json
+        plan = "[ { \"action\": \"curveRowsOver\", \"args\": { \"side\": \"left\", \"deg\": 45, \"rows\": 10 } } ]";
       }
 
       canonicalRaw =
@@ -77,7 +93,7 @@ namespace Aim2Pro.AIGG {
     }
 
     private void ValidateStrict() {
-      bool aiTried = false;
+      aiAlreadyTried = false; // reset guard per validation pass
       unmatched.Clear(); issues.Clear(); strictOK = false; canonicalShown = "";
 
       if (string.IsNullOrWhiteSpace(canonicalRaw)) { issues.Add("No canonical JSON produced."); goto BUILD_ISSUES; }
@@ -97,9 +113,9 @@ namespace Aim2Pro.AIGG {
         else if (cm.Groups[1].Value != pct) issues.Add("missingTileChance ("+cm.Groups[1].Value+") != NL "+pct+"%.");
       }
 
-      // Unmatched tokens (allow numbers, 100m, 20%)
+      // Unmatched tokens (allow numbers, 100m, 20%, common words)
       var allowed = new HashSet<string>(new[]{
-        "build","a","track","with","by","m","tiles","tile","missing","%","curve","rows","left","right","deg","degree","degrees"
+        "build","a","track","with","by","m","tiles","tile","missing","%","curve","rows","left","right","deg","degree","degrees","and","over"
       }, StringComparer.OrdinalIgnoreCase);
       foreach (var tok in Regex.Split(normalized, "[^a-z0-9%]+").Where(t=>!string.IsNullOrEmpty(t))) {
         if (Regex.IsMatch(tok, @"^\d+$|^\d+m$|^\d+%$")) continue;
@@ -125,6 +141,12 @@ namespace Aim2Pro.AIGG {
         if (unmatched.Count > 0) lines.Add("• Unmatched tokens: " + string.Join(", ", unmatched));
         issuesText = string.Join("\n", lines);
       }
+
+      // Optional: auto AI fix if strict failed
+      if (!strictOK && enableOpenAI && autoAiFix && !aiAlreadyTried) {
+        aiAlreadyTried = true;
+        RunAIAutofix();
+      }
     }
 
     private string BuildDiagnosticsJson() {
@@ -133,6 +155,33 @@ namespace Aim2Pro.AIGG {
       return "{ \"ok\": " + ok + ", \"unmatched\": [" + arr + "] }";
     }
 
+    private void RunAIAutofix() {
+      if (!enableOpenAI) { EditorUtility.DisplayDialog("AI disabled","Enable OpenAI to use autofix.","OK"); return; }
+      if (string.IsNullOrEmpty(apiKey)) { EditorUtility.DisplayDialog("Missing API Key","Enter your OpenAI API Key.","OK"); return; }
+      try {
+        var missing = SpecAudit.FindMissingCommands(canonicalRaw ?? "");
+        var fix = AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
+        if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
+        
+        // If AI provided a canonical JSON, adopt it before spec apply
+        if (fix != null && !string.IsNullOrEmpty(fix.canonical)) {
+          canonicalRaw = fix.canonical;
+        }
+bool changed = AIAutoFix.Apply(fix);
+        if (changed) {
+          ValidateStrict();
+          EditorUtility.DisplayDialog("Spec updated by AI",
+            "commands: " + (fix.commands?.Count ?? 0) + ", macros: " + (fix.macros?.Count ?? 0) + ", fieldMap: " + (fix.fieldMap?.Count ?? 0),
+            "OK");
+        } else {
+          EditorUtility.DisplayDialog("No changes", "AI suggested no new entries.", "OK");
+        }
+      } catch (Exception ex) {
+        Debug.LogWarning("[Pre-Merge AI] " + ex.Message);
+      }
+    }
+
+    // --- UI ---
     void OnGUI() {
       GUILayout.Label("Pre-Merge", EditorStyles.boldLabel);
 
@@ -152,10 +201,35 @@ namespace Aim2Pro.AIGG {
 
       GUILayout.Space(6);
       GUILayout.Label("Normalized");
-      EditorGUILayout.TextArea(normalizedDisplay, GUILayout.MinHeight(28));
+      EditorGUILayout.TextArea((!string.IsNullOrEmpty(normalizedDisplay)? normalizedDisplay : normalized), GUILayout.MinHeight(28));
 
       GUILayout.Label("Issues / Missing");
       EditorGUILayout.TextArea(string.IsNullOrEmpty(issuesText) ? "(none)" : issuesText, GUILayout.MinHeight(60));
+
+      // Spec auto-fix buttons (manual)
+      try {
+        var _missingCmds = SpecAudit.FindMissingCommands(canonicalRaw ?? "");
+        if (_missingCmds != null && _missingCmds.Count > 0) {
+          EditorGUILayout.Space(4);
+          if (GUILayout.Button("Add missing commands to spec", GUILayout.Height(22))) {
+            if (SpecAutoFix.EnsureCommandsExist(_missingCmds)) { EditorUtility.DisplayDialog("Spec updated", "Commands added: " + string.Join(", ", _missingCmds), "OK"); ValidateStrict(); }
+          }
+        }
+        if (unmatched != null && unmatched.Count > 0) {
+          EditorGUILayout.Space(4);
+          if (GUILayout.Button($"Add {unmatched.Count} unmatched token(s) as macros", GUILayout.Height(22))) {
+            if (SpecAutoFix.EnsureMacrosExist(unmatched)) { EditorUtility.DisplayDialog("Spec updated", "Macros added: " + string.Join(", ", unmatched), "OK"); ValidateStrict(); }
+          }
+        }
+        bool tilesMissingInNL = Regex.IsMatch(normalized, @"\btiles\s+missing\b");
+        if (tilesMissingInNL && !SpecAutoFix.HasFieldMapPair("tiles missing", "track.missingTileChance")) {
+          EditorGUILayout.Space(4);
+          if (GUILayout.Button("Add field-map: \"tiles missing\" → track.missingTileChance", GUILayout.Height(22))) {
+            var ok = SpecAutoFix.EnsureFieldMapPairs(new Dictionary<string,string>{{"tiles missing","track.missingTileChance"}});
+            if (ok) EditorUtility.DisplayDialog("Spec updated", "Field map added for tiles missing.", "OK");
+          }
+        }
+      } catch (Exception ex) { Debug.LogWarning("[Pre-Merge] Spec auto-fix failed: " + ex.Message); }
 
       GUILayout.Label("Canonical JSON (preview)");
       if (strictOK) {
@@ -174,7 +248,7 @@ namespace Aim2Pro.AIGG {
       apiKey = EditorGUILayout.PasswordField("API Key", apiKey);
       model  = EditorGUILayout.TextField("Model", model);
       GUILayout.BeginHorizontal();
-      if (GUILayout.Button("Save Settings")) { Aim2Pro.AIGG.AIGGEditorPrefs.Save(apiKey, model, autoAiFix); EditorUtility.DisplayDialog("Saved","AI settings saved.","OK"); }
+      if (GUILayout.Button("Save Settings")) { AIGGEditorPrefs.Save(apiKey, model, autoAiFix); EditorUtility.DisplayDialog("Saved","AI settings saved.","OK"); }
       if (GUILayout.Button("Ask AI Now")) { RunAIAutofix(); }
       if (GUILayout.Button("Reveal AI Output Folder")) {}
       GUILayout.EndHorizontal();
@@ -182,24 +256,3 @@ namespace Aim2Pro.AIGG {
     }
   }
 }
-
-
-    private void RunAIAutofix() {
-      if (!enableOpenAI) { EditorUtility.DisplayDialog("AI disabled","Enable OpenAI to use autofix.","OK"); return; }
-      if (string.IsNullOrEmpty(apiKey)) { EditorUtility.DisplayDialog("Missing API Key","Enter your OpenAI API Key.","OK"); return; }
-
-      // Gather context
-      var missing = Aim2Pro.AIGG.SpecAudit.FindMissingCommands(canonicalRaw ?? "");
-      var fix = Aim2Pro.AIGG.AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
-      if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
-
-      bool changed = Aim2Pro.AIGG.AIAutoFix.Apply(fix);
-      if (changed) {
-        ValidateStrict();
-        EditorUtility.DisplayDialog("Spec updated by AI",
-          "commands: " + (fix.commands?.Count ?? 0) + ", macros: " + (fix.macros?.Count ?? 0) + ", fieldMap: " + (fix.fieldMap?.Count ?? 0),
-          "OK");
-      } else {
-        EditorUtility.DisplayDialog("No changes", "AI suggested no new entries.", "OK");
-      }
-    }
