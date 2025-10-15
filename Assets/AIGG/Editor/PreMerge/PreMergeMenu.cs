@@ -26,11 +26,7 @@ namespace Aim2Pro.AIGG.PreMerge
             }
             else
             {
-                EditorUtility.DisplayDialog(
-                    "Pre-Merge",
-                    "Router window not found. You can still send via the button in Pre-Merge (it calls PreMergeRouterAPI.Route).",
-                    "OK"
-                );
+                Aim2Pro.AIGG._AIGGRouterDialogPatch._AIGGRouterTryOpen();
             }
         }
     }

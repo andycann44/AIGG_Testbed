@@ -97,3 +97,22 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+.DS_Store
+/[Tt]emp/
+/[Ll]ibrary/
+/[Ll]ogs/
+/[Bb]uild/
+/[Bb]uilds/
+/[Oo]bj/
+/UserSettings/
+/MemoryCaptures/
+/*.user
+*.csproj
+*.sln
+*.pidb
+*.svd
+*.userprefs
+# AIGG
+Assets/AIGG/_Backups/
+StickerDash_Status/_Snapshots/
+openai.key
