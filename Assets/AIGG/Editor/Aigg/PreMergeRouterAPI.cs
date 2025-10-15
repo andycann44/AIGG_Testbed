@@ -1,71 +1,49 @@
 // ASCII only
-using System;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-using UnityEditor;
-using UnityEngine;
-
+using System; using System.Text.RegularExpressions; using UnityEditor; using UnityEngine;
 namespace Aim2Pro.AIGG {
   public static class PreMergeRouterAPI {
-    public static void Route(string nl, string canonicalJson, string diagnosticsJson) {
-      StrictRoute(nl ?? "", canonicalJson ?? "", diagnosticsJson ?? "");
+    public static void Route(string nl, string canonicalJson, string diagnosticsJson){ StrictRoute(nl??"",canonicalJson??"",diagnosticsJson??""); }
+    public static void RoutePayload(string payloadJson){
+      if (string.IsNullOrWhiteSpace(payloadJson)) { Fail("No payload",null,null,null); return; }
+      string nl = RX("\"nl\"\\s*:\\s*\"([^\"]*)\"", payloadJson);
+      string dj = Obj("\"diagnostics\"\\s*:\\s*\\{", payloadJson);
+      string cj = Obj("\"canonical\"\\s*:\\s*\\{", payloadJson);
+      if (string.IsNullOrEmpty(cj)) { Fail("No canonical", nl,null,dj); return; }
+      if (string.IsNullOrEmpty(dj)) { Fail("No diagnostics", nl,"{"+cj+"}",null); return; }
+      StrictRoute(nl,"{"+cj+"}","{"+dj+"}");
     }
-    public static void RoutePayload(string payloadJson) {
-      if (string.IsNullOrWhiteSpace(payloadJson)) { Fail("No payload", null,null,null); return; }
-      string nl = ExtractString(payloadJson, "\"nl\"\\s*:\\s*\"([^\"]*)\"");
-      string diagnosticsJson = ExtractObject(payloadJson, "\"diagnostics\"\\s*:\\s*\\{", '}');
-      string canonicalJson = ExtractObject(payloadJson, "\"canonical\"\\s*:\\s*\\{", '}');
-      if (string.IsNullOrEmpty(canonicalJson)) { Fail("No canonical", nl,null,diagnosticsJson); return; }
-      if (string.IsNullOrEmpty(diagnosticsJson)) { Fail("No diagnostics", nl,"{"+canonicalJson+"}",null); return; }
-      StrictRoute(nl, "{"+canonicalJson+"}", "{"+diagnosticsJson+"}");
+    private static void StrictRoute(string nl, string cj, string dj){
+      var d = Diagnostics.Parse(dj); if (!d.HasValue){ Fail("Diagnostics parse failed",nl,cj,dj); return; }
+      if (d.unmatched.Count>0 || d.ok==false){ Fail("Unmatched tokens present",nl,cj,dj,d); return; }
+      var missing = SpecAudit.FindMissingCommands(cj); if (missing.Count>0){ Fail("Missing commands: "+string.Join(", ",missing),nl,cj,dj,d); return; }
+      Forward(cj);
     }
-    private static void StrictRoute(string nl, string canonicalJson, string diagnosticsJson) {
-      var diag = Diagnostics.Parse(diagnosticsJson);
-      if (!diag.HasValue) { Fail("Diagnostics parse failed", nl, canonicalJson, diagnosticsJson); return; }
-      if (diag.unmatched.Count > 0 || diag.ok == false) { Fail("Unmatched tokens present", nl, canonicalJson, diagnosticsJson, diag); return; }
-      var missingCmds = SpecAudit.FindMissingCommands(canonicalJson);
-      if (missingCmds.Count > 0) { Fail("Missing commands: " + string.Join(", ", missingCmds), nl, canonicalJson, diagnosticsJson, diag); return; }
-      ForwardToPasteMerge(canonicalJson);
-    }
-    private static void ForwardToPasteMerge(string json) {
+    private static void Forward(string json){
       var asm = AppDomain.CurrentDomain.GetAssemblies();
-      foreach (var a in asm) {
-        var t = a.GetType("Aim2Pro.AIGG.SpecPasteMergeWindow");
-        if (t == null) continue;
-        var m = t.GetMethod("OpenWithJson", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
-        if (m != null) { m.Invoke(null, new object[]{ json }); return; }
-      }
-      EditorGUIUtility.systemCopyBuffer = json;
-      EditorUtility.DisplayDialog("Pre-Merge (Fallback)", "Paste & Merge not found. JSON copied to clipboard.", "OK");
+      foreach (var a in asm){ var t=a.GetType("Aim2Pro.AIGG.SpecPasteMergeWindow"); if (t==null) continue;
+        var m=t.GetMethod("OpenWithJson",System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static);
+        if (m!=null){ m.Invoke(null,new object[]{json}); return; } }
+      EditorGUIUtility.systemCopyBuffer=json;
+      EditorUtility.DisplayDialog("Pre-Merge (Fallback)","Paste & Merge not found. JSON copied to clipboard.","OK");
       Debug.Log("[PreMergeRouterAPI] Paste window not found. JSON copied to clipboard.");
     }
-    private static void Fail(string reason, string nl, string canonicalJson, string diagnosticsJson, Diagnostics? d = null) {
-      PreMergeDiagnosticsWindow.Show(reason ?? "Blocked", nl ?? "", canonicalJson ?? "", diagnosticsJson ?? "", d);
-      Debug.LogWarning("[PreMerge STRICT BLOCK] " + reason);
+    private static void Fail(string reason,string nl,string cj,string dj, Diagnostics? d=null){
+      PreMergeDiagnosticsWindow.Show(reason??"Blocked", nl??"", cj??"", dj??"", d);
+      Debug.LogWarning("[PreMerge STRICT BLOCK] "+reason);
     }
-    private static string ExtractString(string src, string pattern) {
-      var m = Regex.Match(src, pattern); return m.Success ? m.Groups[1].Value : "";
-    }
-    private static string ExtractObject(string src, string anchorPattern, char endChar) {
-      var anchor = Regex.Match(src, anchorPattern); if (!anchor.Success) return "";
-      int start = anchor.Index + anchor.Length - 1; int depth = 0;
-      for (int i = start; i < src.Length; i++) {
-        if (src[i] == '{') depth++; else if (src[i] == '}') { depth--; if (depth == 0) return src.Substring(start+1, i - (start+1)); }
-      }
+    private static string RX(string pat,string src){ var m=Regex.Match(src,pat); return m.Success?m.Groups[1].Value:""; }
+    private static string Obj(string anchor,string src){
+      var a=Regex.Match(src,anchor); if(!a.Success) return ""; int start=a.Index+a.Length-1, depth=0;
+      for(int i=start;i<src.Length;i++){ char c=src[i]; if(c=='{') depth++; else if(c=='}'){ depth--; if(depth==0) return src.Substring(start+1,i-(start+1)); } }
       return "";
     }
-    public struct Diagnostics {
-      public List<string> unmatched; public bool ok;
-      public static Diagnostics? Parse(string json) {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        var d = new Diagnostics{ unmatched = new List<string>(), ok = false };
-        var um = Regex.Match(json, "\"unmatched\"\\s*:\\s*\\[(.*?)\\]");
-        if (um.Success) foreach (Match m in Regex.Matches(um.Groups[1].Value, "\"([^\"]+)\"")) d.unmatched.Add(m.Groups[1].Value);
-        var okm = Regex.Match(json, "\"ok\"\\s*:\\s*(true|false)"); d.ok = okm.Success && okm.Groups[1].Value == "true";
-        return d;
-      }
+    public struct Diagnostics{
+      public System.Collections.Generic.List<string> unmatched; public bool ok;
+      public static Diagnostics? Parse(string json){ if(string.IsNullOrWhiteSpace(json)) return null;
+        var d=new Diagnostics{ unmatched=new System.Collections.Generic.List<string>(), ok=false };
+        var um=Regex.Match(json,"\"unmatched\"\\s*:\\s*\\[(.*?)\\]"); if(um.Success)
+          foreach(Match m in Regex.Matches(um.Groups[1].Value,"\"([^\"]+)\"")) d.unmatched.Add(m.Groups[1].Value);
+        var okm=Regex.Match(json,"\"ok\"\\s*:\\s*(true|false)"); d.ok=okm.Success && okm.Groups[1].Value=="true"; return d; }
     }
   }
 }
