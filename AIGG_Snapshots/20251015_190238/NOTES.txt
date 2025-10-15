@@ -1,0 +1,15 @@
+Snapshot: 20251015_190238
+Created: 2025-10-15T19:02:38+01:00
+
+Git status at snapshot:
+
+## a2p/2025-10-15-restore-premerge-strict-v1...origin/a2p/2025-10-15-restore-premerge-strict-v1 [ahead 4]
+ M Assets/AIGG/Editor/Aigg/AIAutoFix.cs
+ M Assets/AIGG/Editor/Aigg/SpecAutoFix.cs
+ M Assets/AIGG/Spec/commands.json
+ M Assets/AIGG/Spec/fieldmap.json
+?? AIGG_Snapshots/
+?? Assets/AIGG/Editor/Aigg/AIAutoFix.cs.meta
+?? Assets/AIGG/Editor/Aigg/SpecAutoFix.cs.meta
+?? Assets/AIGG/Spec/fieldmap.json.bak.20251015_133554
+?? Assets/AIGG/Spec/fieldmap.json.bak.20251015_133554.meta

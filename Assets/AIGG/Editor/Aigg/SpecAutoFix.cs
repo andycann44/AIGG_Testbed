@@ -14,6 +14,11 @@ namespace Aim2Pro.AIGG {
   [Serializable] class FieldMapPair { public string key = ""; public string value = ""; }
 
   public static class SpecAutoFix {
+    public static List<string> GetMacros() {
+      try { var r = LoadMacros(); return r.macros ?? new System.Collections.Generic.List<string>(); }
+      catch { return new System.Collections.Generic.List<string>(); }
+    }
+
     public const string SpecDir = "Assets/AIGG/Spec";
     public const string CommandsPath = SpecDir + "/commands.json";
     public const string MacrosPath   = SpecDir + "/macros.json";
