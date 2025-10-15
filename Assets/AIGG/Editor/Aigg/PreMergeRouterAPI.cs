@@ -22,43 +22,44 @@ namespace Aim2Pro.AIGG {
       StrictRoute(nl, "{"+cj+"}", "{"+dj+"}");
     }
 
-    // === Compatibility overload for legacy callers ===
-    // Accepts 0/1/2 strings and blocks (shows diagnostics window) if required parts are missing.
+    // === Compatibility overload for legacy callers (strict blocks if diagnostics missing) ===
     public static void Route(params string[] args) {
       if (args == null || args.Length == 0) { Fail("Legacy Route() with no arguments.", "", null, null); return; }
       if (args.Length == 1) {
-        // Could be canonical-only -> block (no diagnostics provided)
         var s0 = args[0] ?? "";
         if (LooksLikeJsonObject(s0)) StrictRoute("", s0, "");
         else Fail("Legacy Route(arg) not understood (need nl, canonical, diagnostics).", s0, null, null);
         return;
       }
       if (args.Length == 2) {
-        // Try to guess ordering; still block if diagnostics is missing.
-        var a = args[0] ?? "";
-        var b = args[1] ?? "";
+        var a = args[0] ?? ""; var b = args[1] ?? "";
         bool bIsDiag = LooksLikeDiagnostics(b);
         bool aIsCanonical = LooksLikeJsonObject(a);
         bool bIsCanonical = LooksLikeJsonObject(b) && !bIsDiag;
-
-        if (aIsCanonical && bIsDiag) { StrictRoute("", a, b); return; }   // canonical, diagnostics
-        if (!aIsCanonical && bIsCanonical) { StrictRoute(a, b, ""); return; } // nl, canonical (no diagnostics -> block)
-        // Unknown combination -> block with hint
+        if (aIsCanonical && bIsDiag) { StrictRoute("", a, b); return; }
+        if (!aIsCanonical && bIsCanonical) { StrictRoute(a, b, ""); return; }
         Fail("Legacy Route(a,b): supply nl, canonical, diagnostics.", a, bIsCanonical?b:null, bIsDiag?b:null);
         return;
       }
-      // 3+ -> treat as (nl, canonical, diagnostics) and ignore extras
       StrictRoute(args[0] ?? "", args[1] ?? "", args[2] ?? "");
     }
 
     // === Core strict routing ===
     private static void StrictRoute(string nl, string canonicalJson, string diagnosticsJson) {
-      var d = Diagnostics.Parse(diagnosticsJson);
-      if (!d.HasValue) { Fail("Diagnostics parse failed (strict).", nl, canonicalJson, diagnosticsJson); return; }
-      if (d.unmatched.Count > 0 || d.ok == false) { Fail("Unmatched tokens present (strict).", nl, canonicalJson, diagnosticsJson, d); return; }
+      var dOpt = Diagnostics.Parse(diagnosticsJson);
+      if (!dOpt.HasValue) { Fail("Diagnostics parse failed (strict).", nl, canonicalJson, diagnosticsJson); return; }
+      var d = dOpt.Value; // <-- FIX: use concrete struct
+
+      if (d.unmatched.Count > 0 || d.ok == false) {
+        Fail("Unmatched tokens present (strict).", nl, canonicalJson, diagnosticsJson, d);
+        return;
+      }
 
       var missing = SpecAudit.FindMissingCommands(canonicalJson);
-      if (missing.Count > 0) { Fail("Missing commands: " + string.Join(", ", missing), nl, canonicalJson, diagnosticsJson, d); return; }
+      if (missing.Count > 0) {
+        Fail("Missing commands: " + string.Join(", ", missing), nl, canonicalJson, diagnosticsJson, d);
+        return;
+      }
 
       Forward(canonicalJson);
     }
