@@ -35,20 +35,20 @@ namespace Aim2Pro.AIGG {
   }
 
   public static class PreMergeWindow {
-    public static void Open(){ Aim2Pro.AIGG.RouterOpenHelper.TryOpen(); }
-public static void Route(string nl, string canonical, string diagnostics){ PreMergeRouterAPI.Route(nl,canonical,diagnostics); }
+    
+    public static void Route(string nl, string canonical, string diagnostics){ PreMergeRouterAPI.Route(nl,canonical,diagnostics); }
     public static void Route(string canonical){ PreMergeRouterAPI.Route(canonical); }
     public static void Route(string nl, string canonical){ PreMergeRouterAPI.Route(nl,canonical); }
   }
 
   public static class PreMergeCenterWindow {
-    public static void Open(){ Aim2Pro.AIGG.RouterOpenHelper.TryOpen(); }
-public static void Route(string nl, string canonical, string diagnostics){ PreMergeRouterAPI.Route(nl,canonical,diagnostics); }
+    
+    public static void Route(string nl, string canonical, string diagnostics){ PreMergeRouterAPI.Route(nl,canonical,diagnostics); }
     public static void Route(string canonical){ PreMergeRouterAPI.Route(canonical); }
     public static void Route(string nl, string canonical){ PreMergeRouterAPI.Route(nl,canonical); }
   }
 
   public static class PreMergeRouter {
-    public static void Open(){ Aim2Pro.AIGG.RouterOpenHelper.TryOpen(); }
-}
+    
+  }
 }
