@@ -162,6 +162,7 @@ namespace Aim2Pro.AIGG {
         var missing = SpecAudit.FindMissingCommands(canonicalRaw ?? "");
         var fix = AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
         if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
+        try { var dir = Aim2Pro.AIGG.TempMerge.SaveFromAI(fix, canonicalRaw); Aim2Pro.AIGG.BatchMergeWindow.OpenForDir(dir); } catch (System.Exception ex) { Debug.LogWarning("[Pre-Merge] could not open batch tabs: " + ex.Message); }
         
         // If AI provided a canonical JSON, adopt it before spec apply
         if (fix != null && !string.IsNullOrEmpty(fix.canonical)) {
