@@ -1,22 +1,6 @@
 {
-  "commands": [
-    {
-      "name": "s-curve-guarded",
-      "regex": "\\bs-curve\\s+left\\s+(\\d+)\\s*-\\s*(\\d+)\\s+seam\\s+(\\d+)\\s*-\\s*(\\d+)\\s+right\\s+(\\d+)\\s*-\\s*(\\d+)\\s+(\\d+(?:\\.\\d+)?)\\s*deg\\b",
-      "kernel": [
-        { "op": "StraightenRows", "args": { "start": "$3:int", "end": "$4:int" } },
-        { "op": "CurveRows",      "args": { "start": "$1:int", "end": "$2:int", "side": "left",  "deg": "$7:float" } },
-        { "op": "CurveRows",      "args": { "start": "$5:int", "end": "$6:int", "side": "right", "deg": "$7:float" } }
-      ]
-    },
-    {
-      "name": "s-curve-guarded-rl",
-      "regex": "\\bs-curve\\s+right\\s+(\\d+)\\s*-\\s*(\\d+)\\s+seam\\s+(\\d+)\\s*-\\s*(\\d+)\\s+left\\s+(\\d+)\\s*-\\s*(\\d+)\\s+(\\d+(?:\\.\\d+)?)\\s*deg\\b",
-      "kernel": [
-        { "op": "StraightenRows", "args": { "start": "$3:int", "end": "$4:int" } },
-        { "op": "CurveRows",      "args": { "start": "$1:int", "end": "$2:int", "side": "right", "deg": "$7:float" } },
-        { "op": "CurveRows",      "args": { "start": "$5:int", "end": "$6:int", "side": "left",  "deg": "$7:float" } }
-      ]
-    }
+  "macros": [
+    "then",
+    "zigzag"
   ]
 }
