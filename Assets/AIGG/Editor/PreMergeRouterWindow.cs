@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using System;
 using System.Linq;
+using UnityEngine.Networking;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 
@@ -19,6 +20,7 @@ namespace Aim2Pro.AIGG {
 
     private bool enableOpenAI = false;
     private bool aiFirst = false;
+    private bool autoAiFix = false;
     private string apiKey = "";
     private string model = "gpt-4o-mini";
 
@@ -29,6 +31,8 @@ namespace Aim2Pro.AIGG {
       w.minSize = new Vector2(560, 420);
       w.Show();
     }
+
+    void OnEnable(){ apiKey = Aim2Pro.AIGG.AIGGEditorPrefs.LoadKey(); model = Aim2Pro.AIGG.AIGGEditorPrefs.LoadModel(); autoAiFix = Aim2Pro.AIGG.AIGGEditorPrefs.LoadAuto(); }
 
     private string Normalize(string s) {
       s = (s ?? "").Replace("\r"," ");
@@ -73,6 +77,7 @@ namespace Aim2Pro.AIGG {
     }
 
     private void ValidateStrict() {
+      bool aiTried = false;
       unmatched.Clear(); issues.Clear(); strictOK = false; canonicalShown = "";
 
       if (string.IsNullOrWhiteSpace(canonicalRaw)) { issues.Add("No canonical JSON produced."); goto BUILD_ISSUES; }
@@ -164,15 +169,37 @@ namespace Aim2Pro.AIGG {
       GUILayout.Label("AI Assist");
       enableOpenAI = EditorGUILayout.ToggleLeft("Enable OpenAI", enableOpenAI);
       aiFirst = EditorGUILayout.ToggleLeft("AI-first (skip local extraction)", aiFirst);
+      autoAiFix = EditorGUILayout.ToggleLeft("Auto-apply AI fixes", autoAiFix);
       EditorGUI.BeginDisabledGroup(!enableOpenAI);
       apiKey = EditorGUILayout.PasswordField("API Key", apiKey);
       model  = EditorGUILayout.TextField("Model", model);
       GUILayout.BeginHorizontal();
-      if (GUILayout.Button("Save Settings")) {}
-      if (GUILayout.Button("Ask AI Now")) {}
+      if (GUILayout.Button("Save Settings")) { Aim2Pro.AIGG.AIGGEditorPrefs.Save(apiKey, model, autoAiFix); EditorUtility.DisplayDialog("Saved","AI settings saved.","OK"); }
+      if (GUILayout.Button("Ask AI Now")) { RunAIAutofix(); }
       if (GUILayout.Button("Reveal AI Output Folder")) {}
       GUILayout.EndHorizontal();
       EditorGUI.EndDisabledGroup();
     }
   }
 }
+
+
+    private void RunAIAutofix() {
+      if (!enableOpenAI) { EditorUtility.DisplayDialog("AI disabled","Enable OpenAI to use autofix.","OK"); return; }
+      if (string.IsNullOrEmpty(apiKey)) { EditorUtility.DisplayDialog("Missing API Key","Enter your OpenAI API Key.","OK"); return; }
+
+      // Gather context
+      var missing = Aim2Pro.AIGG.SpecAudit.FindMissingCommands(canonicalRaw ?? "");
+      var fix = Aim2Pro.AIGG.AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
+      if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
+
+      bool changed = Aim2Pro.AIGG.AIAutoFix.Apply(fix);
+      if (changed) {
+        ValidateStrict();
+        EditorUtility.DisplayDialog("Spec updated by AI",
+          "commands: " + (fix.commands?.Count ?? 0) + ", macros: " + (fix.macros?.Count ?? 0) + ", fieldMap: " + (fix.fieldMap?.Count ?? 0),
+          "OK");
+      } else {
+        EditorUtility.DisplayDialog("No changes", "AI suggested no new entries.", "OK");
+      }
+    }
