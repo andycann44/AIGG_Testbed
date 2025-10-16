@@ -1,4 +1,3 @@
-#if AIGG_ENABLE_WORKBENCH
 using System;
 using System.Globalization;
 namespace Aim2Pro.AIGG
@@ -17,4 +16,3 @@ namespace Aim2Pro.AIGG
         public static float Clamp01(float v) => v < 0f ? 0f : v > 1f ? 1f : (float)(double.IsNaN(v) ? 0f : v);
     }
 }
-#endif // AIGG_ENABLE_WORKBENCH

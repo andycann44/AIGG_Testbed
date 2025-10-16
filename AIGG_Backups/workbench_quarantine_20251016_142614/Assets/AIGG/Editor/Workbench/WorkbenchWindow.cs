@@ -1,4 +1,3 @@
-#if AIGG_ENABLE_WORKBENCH
 // WorkbenchWindow. minimal, compile-safecs 
 using UnityEditor;
 using UnityEngine;
@@ -43,4 +42,3 @@ namespace Aim2Pro.AIGG.Workbench
         }
     }
 }
-#endif // AIGG_ENABLE_WORKBENCH

@@ -1,0 +1,24 @@
+// Auto-generated partial to satisfy AIAutoFix.ProposedFix reference.
+// If you already have AIAutoFix elsewhere, this matches its namespace/static.
+using System;
+
+namespace Aim2Pro.AIGG {
+    public static partial class AIAutoFix {
+        [Serializable]
+        public struct ProposedFix {
+            public string Title;
+            public string Details;
+            public string Json;          // optional canonical/intents JSON
+            public string Severity;      // info|warn|error
+            public string[] Files;       // files to touch (optional)
+
+            public ProposedFix(string title, string details, string json = null, string severity = "info", string[] files = null) {
+                Title = title ?? string.Empty;
+                Details = details ?? string.Empty;
+                Json = json;
+                Severity = severity ?? "info";
+                Files = files ?? Array.Empty<string>();
+            }
+        }
+    }
+}
