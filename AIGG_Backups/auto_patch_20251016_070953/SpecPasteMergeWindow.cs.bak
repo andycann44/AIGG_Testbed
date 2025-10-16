@@ -18,24 +18,6 @@ namespace Aim2Pro.AIGG
 {
     public class SpecPasteMergeWindow : EditorWindow
     {
-  private static readonly (string Label, string FileName)[] kTargets = new[] {
-    ("Aliases","aliases.json"),
-    ("Commands","commands.json"),
-    ("Defaults","defaults.json"),
-    ("FieldMap","fieldmap.json"),
-    ("Generators","generators.json"),
-    ("Intents","intents.json"),
-    ("Lexicon","lexicon.json"),
-    ("Macros","macros.json"),
-    ("Patterns","patterns.json"),
-    ("Presets","presets.json"),
-    ("Registry","registry.json"),
-    ("Rules","rules.json"),
-    ("Schema","schema.json"),
-  };
-  private int _targetIndex = 0;
-  private string _specFolder = "Assets/AIGG/Spec";
-
         enum TargetType { Lexicon, Fieldmap, Intents, Schema, Registry, Commands, Macros }
         enum DupPolicy  { Skip, Replace }
 
@@ -736,20 +718,7 @@ namespace Aim2Pro.AIGG
             root[key] = nl;
             return nl;
         }
-
-  private void EnsureTargetFileExists(string path) {
-    if (!System.IO.File.Exists(path)) {
-      string json = "{}\n";
-      var label = kTargets[_targetIndex].Label;
-      if (label == "Macros")       json = "{\n  \"macros\": []\n}\n";
-      else if (label == "FieldMap") json = "{\n  \"fieldMap\": []\n}\n";
-      else if (label == "Commands") json = "{\n  \"commands\": []\n}\n";
-      System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
-      System.IO.File.WriteAllText(path, json);
-      UnityEditor.AssetDatabase.ImportAsset(path);
     }
-  }
-}
 
     // --------- Mini JSON ----------
     static class MiniJSON
@@ -1021,16 +990,3 @@ namespace Aim2Pro.AIGG
     }
 }
 #endif
-
-  private void EnsureTargetFileExists(string path) {
-    if (!System.IO.File.Exists(path)) {
-      string json = "{}\n";
-      var label = kTargets[_targetIndex].Label;
-      if (label=="Macros")   json = "{\n  \"macros\": []\n}\n";
-      else if (label=="FieldMap") json = "{\n  \"fieldMap\": []\n}\n";
-      else if (label=="Commands") json = "{\n  \"commands\": []\n}\n";
-      System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
-      System.IO.File.WriteAllText(path, json);
-      UnityEditor.AssetDatabase.ImportAsset(path);
-    }
-  }

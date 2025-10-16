@@ -5,7 +5,6 @@ using System;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
-using System.IO; // <- added
 
 namespace Aim2Pro.AIGG {
   public class PreMergeRouterWindow : EditorWindow {
@@ -19,7 +18,6 @@ namespace Aim2Pro.AIGG {
     private bool strictOK = false;
     private readonly List<string> unmatched = new List<string>();
     private readonly List<string> issues = new List<string>();
-    private readonly List<string> _lastUnmatchedTokens = new List<string>();
 
     // AI
     private bool enableOpenAI = false;
@@ -28,23 +26,6 @@ namespace Aim2Pro.AIGG {
     private string apiKey = "";
     private string model = "gpt-4o-mini";
     private bool aiAlreadyTried = false;
-
-    // --- spec targets (label + filename) ---
-    private static readonly (string Label, string FileName)[] kTargets = new[] {
-      ("Aliases",   "aliases.json"),
-      ("Commands",  "commands.json"),
-      ("Defaults",  "defaults.json"),
-      ("FieldMap",  "fieldmap.json"),
-      ("Generators","generators.json"),
-      ("Intents",   "intents.json"),
-      ("Lexicon",   "lexicon.json"),
-      ("Macros",    "macros.json"),
-      ("Patterns",  "patterns.json"),
-      ("Presets",   "presets.json"),
-      ("Registry",  "registry.json"),
-      ("Rules",     "rules.json"),
-      ("Schema",    "schema.json"),
-    };
 
     [MenuItem("Window/Aim2Pro/Aigg/Pre-Merge")]
     public static void Open() {
@@ -82,7 +63,8 @@ namespace Aim2Pro.AIGG {
       int width  = ExtractInt(normalized, @"\bby\s+(\d+)\s*m\b");
       float missing = ExtractFloat(normalized, @"\b(\d+)\s*%\s*tiles?\s*missing\b");
 
-      canonicalRaw = ""; // always build a skeleton; STRICT will flag missing fields
+      canonicalRaw = "";
+      if (length <= 0 && width <= 0 && missing <= 0) return;
 
       string missingLine = missing > 0 ? (",\n    \"missingTileChance\": " + missing) : "";
       string plan = "[]";
@@ -141,13 +123,6 @@ namespace Aim2Pro.AIGG {
         unmatched.Add(tok);
       }
 
-      // store the last unmatched tokens for UI/history
-      // populate _lastUnmatchedTokens (unique, in-order)
-      _lastUnmatchedTokens.Clear();
-      foreach (var t in unmatched) {
-        if (!_lastUnmatchedTokens.Contains(t)) _lastUnmatchedTokens.Add(t);
-      }
-      
       foreach (var miss in SpecAudit.FindMissingCommands(canonicalRaw)) issues.Add("Unknown plan command: " + miss);
 
       if (unmatched.Count == 0 && issues.Count == 0) {
@@ -163,7 +138,7 @@ namespace Aim2Pro.AIGG {
       else {
         var lines = new List<string>();
         foreach (var i in issues) lines.Add("• " + i);
-        if (_lastUnmatchedTokens.Count > 0) lines.Add("• Unmatched tokens: " + string.Join(", ", _lastUnmatchedTokens));
+        if (unmatched.Count > 0) lines.Add("• Unmatched tokens: " + string.Join(", ", unmatched));
         issuesText = string.Join("\n", lines);
       }
 
@@ -187,7 +162,6 @@ namespace Aim2Pro.AIGG {
         var missing = SpecAudit.FindMissingCommands(canonicalRaw ?? "");
         var fix = AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
         if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
-        try { var dir = Aim2Pro.AIGG.TempMerge.SaveFromAI(fix, canonicalRaw); Aim2Pro.AIGG.BatchMergeWindow.OpenForDir(dir); } catch (System.Exception ex) { Debug.LogWarning("[Pre-Merge] could not open batch tabs: " + ex.Message); }
         
         // If AI provided a canonical JSON, adopt it before spec apply
         if (fix != null && !string.IsNullOrEmpty(fix.canonical)) {
@@ -213,24 +187,6 @@ bool changed = AIAutoFix.Apply(fix);
 
       GUILayout.Label("Natural Language (input)");
       nlInput = EditorGUILayout.TextArea(nlInput, GUILayout.MinHeight(60));
-
-      // Select which spec file target to edit/validate
-      _targetIndex = EditorGUILayout.Popup("Target", _targetIndex, kTargets.Select(t => t.Label).ToArray());
-      _specFolder = EditorGUILayout.TextField("Spec Folder", _specFolder);
-
-      // ensure the target file exists (create basic skeleton if missing)
-      var filePath = GetTargetFilePath();
-      if (!File.Exists(filePath)) {
-        var initial = kTargets[_targetIndex].Label switch {
-          "Macros"   => "{\n  \"macros\": []\n}\n",
-          "FieldMap" => "{\n  \"fieldMap\": []\n}\n",
-          "Commands" => "{\n  \"commands\": []\n}\n",
-          _          => "{\n}\n"
-        };
-        Directory.CreateDirectory(Path.GetDirectoryName(filePath) ?? _specFolder);
-        File.WriteAllText(filePath, initial);
-        AssetDatabase.ImportAsset(filePath);
-      }
 
       GUILayout.BeginHorizontal();
       if (GUILayout.Button("Run Pre-Merge", GUILayout.Height(24))) { RunLocalExtract(); ValidateStrict(); }
@@ -259,31 +215,12 @@ bool changed = AIAutoFix.Apply(fix);
             if (SpecAutoFix.EnsureCommandsExist(_missingCmds)) { EditorUtility.DisplayDialog("Spec updated", "Commands added: " + string.Join(", ", _missingCmds), "OK"); ValidateStrict(); }
           }
         }
-        // Add unmatched tokens as macros (uses the last-unmatched token list)
-        EditorGUI.BeginDisabledGroup(_lastUnmatchedTokens.Count == 0);
-        EditorGUILayout.Space(4);
-        if (GUILayout.Button($"Add {_lastUnmatchedTokens.Count} unmatched token(s) as macros", GUILayout.Height(22))) {
-          try {
-            // de-dupe & lowercase for consistency
-            var add = _lastUnmatchedTokens
-              .Distinct(StringComparer.OrdinalIgnoreCase)
-              .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-              .ToArray();
-
-            bool changed = SpecAutoFix.EnsureMacrosExist(add); // writes Assets/AIGG/Spec/macros.json (and backs up outside Assets)
-            if (changed) {
-              AssetDatabase.Refresh();
-              ValidateStrict(); // re-run with the new macros so Issues clears immediately
-              EditorUtility.DisplayDialog("Macros", $"Added {add.Length} macro(s).", "OK");
-            } else {
-              EditorUtility.DisplayDialog("Macros", "No changes (already present).", "OK");
-            }
-          } catch (Exception ex) {
-            Debug.LogWarning("[Pre-Merge] Add macros failed: " + ex.Message);
-            EditorUtility.DisplayDialog("Macros", "Failed: " + ex.Message, "OK");
+        if (unmatched != null && unmatched.Count > 0) {
+          EditorGUILayout.Space(4);
+          if (GUILayout.Button($"Add {unmatched.Count} unmatched token(s) as macros", GUILayout.Height(22))) {
+            if (SpecAutoFix.EnsureMacrosExist(unmatched)) { EditorUtility.DisplayDialog("Spec updated", "Macros added: " + string.Join(", ", unmatched), "OK"); ValidateStrict(); }
           }
         }
-        EditorGUI.EndDisabledGroup();
         bool tilesMissingInNL = Regex.IsMatch(normalized, @"\btiles\s+missing\b");
         if (tilesMissingInNL && !SpecAutoFix.HasFieldMapPair("tiles missing", "track.missingTileChance")) {
           EditorGUILayout.Space(4);
@@ -316,10 +253,6 @@ bool changed = AIAutoFix.Apply(fix);
       if (GUILayout.Button("Reveal AI Output Folder")) {}
       GUILayout.EndHorizontal();
       EditorGUI.EndDisabledGroup();
-    }
-
-    private string GetTargetFilePath() {
-      return Path.Combine(_specFolder, kTargets[_targetIndex].FileName).Replace('\\','/');
     }
   }
 }

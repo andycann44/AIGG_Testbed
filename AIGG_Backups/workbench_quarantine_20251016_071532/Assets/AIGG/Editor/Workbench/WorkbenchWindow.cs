@@ -1,4 +1,3 @@
-#if AIGG_ENABLE_WORKBENCH
 #if UNITY_EDITOR
 // Assets/AIGG/Editor/Workbench/WorkbenchWindow.cs
 #if UNITY_EDITOR
@@ -831,4 +830,3 @@ namespace Aim2Pro.AIGG.Workbench
 }
 #endif
 #endif
-#endif // AIGG_ENABLE_WORKBENCH

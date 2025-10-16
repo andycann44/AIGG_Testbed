@@ -12,8 +12,7 @@ namespace Aim2Pro.AIGG {
     public List<string> commands = new List<string>();
     public List<string> macros = new List<string>();
     public List<FieldPair> fieldMap = new List<FieldPair>();
-    public string canonical = "";
-    public System.Collections.Generic.Dictionary<string, string> files = new System.Collections.Generic.Dictionary<string, string>(); // optional
+    public string canonical = ""; // optional
   }
   [Serializable] public class FieldPair { public string key = ""; public string value = ""; }
 
@@ -96,7 +95,13 @@ namespace Aim2Pro.AIGG {
       if (string.IsNullOrEmpty(apiKey)) { error = "No API key."; return result; }
       if (string.IsNullOrEmpty(model)) model = DefaultModel;
 
-      var sys = "You update a game parsing spec. Return ONLY a JSON object with keys: \"commands\":[string], \"macros\":[string], \"fieldMap\":[{\"key\":\"<phrase>\",\"value\":\"<canonical.path>\"}], optional \"canonical\":\"<strict canonical JSON>\", and optional \"files\":{...}. For \"files\", each value MUST be a single STRING containing the EXACT file contents. Allowed file names: aliases.json, commands.json, defaults.json, fieldmap.json, generators.json, intents.json, lexicon.json, macros.json (or macros.txt), patterns.json, presets.json, registry.json, rules.json, schema.json. macros.* should be newline-separated tokens; fieldmap.* should be lines of \"key => value\". Only include files you are confident about. Return only the JSON object.";
+      var sys =
+        "You update a game parsing spec. Return ONLY a JSON object with keys: "
+        + "\"commands\":[string], \"macros\":[string], "
+        + "\"fieldMap\":[{\"key\":\"<phrase>\",\"value\":\"<canonical.path>\"}], "
+        + "and optionally \"canonical\":\"<strict canonical JSON>\". "
+        + "Action-like new words -> commands (e.g., zigzagRows). Filler words (then,and,over) -> macros. "
+        + "Include 'tiles missing' -> 'track.missingTileChance' in fieldMap where relevant.";
 
       var user =
         "Natural language: " + nl + "\n"

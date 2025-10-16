@@ -1,4 +1,3 @@
-#if AIGG_ENABLE_WORKBENCH
 using System;
 using System.Reflection;
 namespace Aim2Pro.AIGG.Workbench
@@ -28,4 +27,3 @@ namespace Aim2Pro.AIGG.Workbench
         static string Escape(string s) => (s??"").Replace("\\","\\\\").Replace("\"","\\\"");
     }
 }
-#endif // AIGG_ENABLE_WORKBENCH

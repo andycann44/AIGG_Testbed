@@ -1,0 +1,5 @@
+track.length => 100
+track.width => 6
+track.missingTileChance => 20
+track.tileSpacing => 1
+track.killzoneY => -5

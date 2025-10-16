@@ -43,26 +43,15 @@ namespace Aim2Pro.AIGG {
       active = Mathf.Clamp(active, 0, Math.Max(0, tabs.Count-1));
     }
 
-    
     string GuessTarget(string name) {
       var f = name.ToLowerInvariant();
-      if (f.Contains("aliases"))   return "Aliases";
-      if (f.Contains("commands"))  return "Commands";
-      if (f.Contains("defaults"))  return "Defaults";
-      if (f.Contains("fieldmap"))  return "FieldMap";
-      if (f.Contains("generators"))return "Generators";
-      if (f.Contains("intents"))   return "Intents";
-      if (f.Contains("lexicon"))   return "Lexicon";
-      if (f.Contains("macros"))    return "Macros";
-      if (f.Contains("patterns"))  return "Patterns";
-      if (f.Contains("presets"))   return "Presets";
-      if (f.Contains("registry"))  return "Registry";
-      if (f.Contains("rules"))     return "Rules";
-      if (f.Contains("schema"))    return "Schema";
+      if (f.Contains("commands")) return "Commands";
+      if (f.Contains("macros")) return "Macros";
+      if (f.Contains("fieldmap")) return "FieldMap";
+      if (f.Contains("lexicon")) return "Lexicon";
       if (f.Contains("canonical")) return "Canonical (preview)";
       return "Unknown";
     }
-    
 
     void OnGUI() {
       GUILayout.BeginHorizontal(EditorStyles.toolbar);
