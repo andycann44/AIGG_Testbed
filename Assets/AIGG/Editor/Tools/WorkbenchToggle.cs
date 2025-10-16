@@ -1,3 +1,4 @@
+#pragma warning disable 618
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -32,3 +33,5 @@ namespace Aim2Pro.AIGG {
     }
   }
 }
+
+#pragma warning restore 618

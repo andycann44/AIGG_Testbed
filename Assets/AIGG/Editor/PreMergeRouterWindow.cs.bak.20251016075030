@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.IO; // <- added
 
 namespace Aim2Pro.AIGG {
-  public partial class PreMergeRouterWindow : EditorWindow {
+  public class PreMergeRouterWindow : EditorWindow {
     // --- state ---
     private string nlInput = "";
     private string normalized = "";

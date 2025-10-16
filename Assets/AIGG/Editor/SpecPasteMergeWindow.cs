@@ -16,7 +16,7 @@ using System.Linq;
 
 namespace Aim2Pro.AIGG
 {
-    public class SpecPasteMergeWindow : EditorWindow
+    public partial class SpecPasteMergeWindow : EditorWindow
     {
   private static readonly (string Label, string FileName)[] kTargets = new[] {
     ("Aliases","aliases.json"),
@@ -1022,15 +1022,11 @@ namespace Aim2Pro.AIGG
 }
 #endif
 
-  private void EnsureTargetFileExists(string path) {
-    if (!System.IO.File.Exists(path)) {
-      string json = "{}\n";
-      var label = kTargets[_targetIndex].Label;
-      if (label=="Macros")   json = "{\n  \"macros\": []\n}\n";
-      else if (label=="FieldMap") json = "{\n  \"fieldMap\": []\n}\n";
-      else if (label=="Commands") json = "{\n  \"commands\": []\n}\n";
-      System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
-      System.IO.File.WriteAllText(path, json);
-      UnityEditor.AssetDatabase.ImportAsset(path);
+
+namespace Aim2Pro.AIGG {
+    public partial class SpecPasteMergeWindow : UnityEditor.EditorWindow
+    {
+
+
     }
-  }
+}
