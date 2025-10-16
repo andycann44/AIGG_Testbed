@@ -29,7 +29,7 @@ namespace Aim2Pro.AIGG {
       File.WriteAllText(Path.Combine(dir, name), text);
     }
 
-    public static string SaveFromAI(AIAutoFix.ProposedFix fix, string canonical) {
+    public static string SaveFromAI(ProposedFix fix, string canonical) {
       var dir = NewBatchDir();
       try {
         if (fix != null) {

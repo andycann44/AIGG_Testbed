@@ -8,15 +8,9 @@ using UnityEngine;
 using UnityEngine.Networking;
 
 namespace Aim2Pro.AIGG {
-  [Serializable] public class ProposedFix {
-    public List<string> commands = new List<string>();
-    public List<string> macros = new List<string>();
-    public List<FieldPair> fieldMap = new List<FieldPair>();
-    public string canonical = ""; // optional
-  }
-  [Serializable] public class FieldPair { public string key = ""; public string value = ""; }
+[Serializable] public class FieldPair { public string key = ""; public string value = ""; }
 
-  public static class AIAutoFix {
+  public static partial class AIAutoFix {
     const string DefaultModel = "gpt-4o-mini";
     const string ChatUrl = "https://api.openai.com/v1/chat/completions";
 
