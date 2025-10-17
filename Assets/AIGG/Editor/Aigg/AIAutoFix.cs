@@ -1,3 +1,4 @@
+#if AIGG_ENABLE_AUTOFIX
 // ASCII only
 using System;
 using System.Text;
@@ -165,3 +166,4 @@ namespace Aim2Pro.AIGG {
     public static bool LoadAuto()=>EditorPrefs.GetBool(AUTO,false);
   }
 }
+#endif
