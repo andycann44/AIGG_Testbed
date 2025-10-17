@@ -7,105 +7,156 @@ using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
+    /// <summary>
+    /// Utilities to push text into the original Paste & Merge window's "Pasted Content" text field.
+    /// Uses reflection, but is read-only/safe for the target window.
+    /// </summary>
     internal static class PasteMergeTempBridge
     {
-        static readonly string Root = "Assets/AIGG/Temp";
-        static readonly string[] Slots = new[]{
-            "intents","lexicon","macros","commands","fieldmap","registry","schema","router",
-            "nl","canonical","diagnostics","aliases","shims","nullable","overrides"
+        public const string TempRoot = "Assets/AIGG/Temp";
+
+        // Buckets we expose
+        public static readonly string[] Buckets = new[]{
+            "intents","lexicon","macros","commands","fieldmap","registry","schema",
+            "router","nl","canonical","diagnostics","aliases","shims","nullable","overrides"
         };
 
-        static string PathFor(string tag) => System.IO.Path.Combine(Root, $"temp_{tag}.json");
-        static string Read(string tag) { var p = PathFor(tag); return File.Exists(p) ? File.ReadAllText(p) : ""; }
-
-        static EditorWindow OpenOriginalWindow(out Type t)
+        /// <summary>
+        /// Loads the temp JSON for a bucket and pushes it into the P&M "Pasted Content" area.
+        /// </summary>
+        public static void LoadBucketIntoPM(string bucket)
         {
-            t = AppDomain.CurrentDomain.GetAssemblies()
+            var path = Path.Combine(TempRoot, $"temp_{bucket}.json").Replace("\\","/");
+            if (!File.Exists(path))
+            {
+                EditorUtility.DisplayDialog("Temp not found",
+                    $"No file:\n{path}\n\nRun Ask AI or the splitter first.", "OK");
+                return;
+            }
+            var json = File.ReadAllText(path);
+
+            // Ensure window is open
+            if (!OpenPasteMergeWindow())
+            {
+                EditorUtility.DisplayDialog("Paste & Merge not found",
+                    "Could not find/open the original Paste & Merge window.", "OK");
+                return;
+            }
+
+            // Find the P&M window and push the text.
+            // We try common names: SpecPasteMergeWindow or any type containing 'PasteMerge'.
+            var pmType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
-                .FirstOrDefault(x => x.Name == "SpecPasteMergeWindow" && typeof(EditorWindow).IsAssignableFrom(x));
-            if (t != null) return EditorWindow.GetWindow(t);
-            Debug.LogWarning("[Paste&Merge Bridge] SpecPasteMergeWindow not found.");
-            return null;
+                .FirstOrDefault(t => typeof(EditorWindow).IsAssignableFrom(t) &&
+                                     (t.Name == "SpecPasteMergeWindow" || t.Name.Contains("PasteMerge")));
+
+            if (pmType == null)
+            {
+                Debug.LogWarning("[TempBridge] Paste & Merge type not found.");
+                return;
+            }
+
+            var pm = Resources.FindObjectsOfTypeAll(pmType).FirstOrDefault() as EditorWindow;
+            if (pm == null)
+            {
+                Debug.LogWarning("[TempBridge] Paste & Merge window instance not found.");
+                return;
+            }
+
+            // Try common private field/property names for the pasted content text.
+            // We'll check string fields or properties which look like the pasted box.
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+            string assignedTo = null;
+
+            // Heuristic: look for fields with "pasted" or "input" in the name, type string.
+            var fields = pmType.GetFields(flags)
+                .Where(f => f.FieldType == typeof(string))
+                .OrderBy(f => f.Name.Length)
+                .ToArray();
+
+            var props = pmType.GetProperties(flags)
+                .Where(p => p.PropertyType == typeof(string) && p.CanWrite)
+                .OrderBy(p => p.Name.Length)
+                .ToArray();
+
+            string[] candidates = { "pasted", "pastedContent", "input", "text", "json" };
+
+            foreach (var f in fields)
+            {
+                if (candidates.Any(c => f.Name.IndexOf(c, StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    f.SetValue(pm, json);
+                    assignedTo = $"field {f.Name}";
+                    break;
+                }
+            }
+
+            if (assignedTo == null)
+            {
+                foreach (var p in props)
+                {
+                    if (candidates.Any(c => p.Name.IndexOf(c, StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        p.SetValue(pm, json);
+                        assignedTo = $"property {p.Name}";
+                        break;
+                    }
+                }
+            }
+
+            // As a last resort, try a method like SetPasted(string)
+            if (assignedTo == null)
+            {
+                var m = pmType.GetMethods(flags).FirstOrDefault(x =>
+                    x.GetParameters().Length == 1 &&
+                    x.GetParameters()[0].ParameterType == typeof(string) &&
+                    (x.Name.IndexOf("SetPasted", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     x.Name.IndexOf("LoadFromText", StringComparison.OrdinalIgnoreCase) >= 0)
+                );
+                if (m != null)
+                {
+                    m.Invoke(pm, new object[]{ json });
+                    assignedTo = $"method {m.Name}(string)";
+                }
+            }
+
+            if (assignedTo == null)
+            {
+                // Fallback: copy to clipboard so the user can Cmd+V into the box.
+                EditorGUIUtility.systemCopyBuffer = json;
+                EditorUtility.DisplayDialog("Could not bind field automatically",
+                    "Pasted JSON copied to clipboard.\nPress Cmd+V in the P&M 'Pasted Content' box.",
+                    "OK");
+                assignedTo = "clipboard";
+            }
+
+            pm.Repaint();
+            Debug.Log($"[TempBridge] Loaded temp_{bucket}.json into P&M ({assignedTo}).");
         }
 
-        static bool TrySetPastedContent(EditorWindow win, Type t, string json)
+        /// <summary>
+        /// Tries to open the original Paste & Merge window using the menu path first, then type.
+        /// </summary>
+        public static bool OpenPasteMergeWindow()
         {
-            if (win == null || t == null) return false;
-
-            // Heuristic: find a string field that likely backs the big "Pasted Content" TextArea
-            const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var field = t.GetFields(BF).FirstOrDefault(f =>
-                f.FieldType == typeof(string) &&
-                (f.Name.IndexOf("paste", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 f.Name.IndexOf("input", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 f.Name.IndexOf("content", StringComparison.OrdinalIgnoreCase) >= 0));
-
-            if (field != null)
+            string[] menuCandidates =
             {
-                field.SetValue(win, json ?? "");
-                win.Repaint();
-                Debug.Log($"[Paste&Merge Bridge] Injected JSON via field '{field.Name}'.");
+                "Window/Aim2Pro/Aigg/Paste & Merge",
+                "Window/Aim2Pro/Aigg/Paste & Merge (Legacy)"
+            };
+            foreach (var m in menuCandidates)
+                if (EditorApplication.ExecuteMenuItem(m)) return true;
+
+            var pmType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                .FirstOrDefault(t => typeof(EditorWindow).IsAssignableFrom(t) &&
+                                     (t.Name == "SpecPasteMergeWindow" || t.Name.Contains("PasteMerge")));
+            if (pmType != null)
+            {
+                EditorWindow.GetWindow(pmType, utility:false, title:"Paste & Merge");
                 return true;
             }
-
-            // Fallback 1: look for a property with similar name
-            var prop = t.GetProperties(BF).FirstOrDefault(p =>
-                p.CanWrite && p.PropertyType == typeof(string) &&
-                (p.Name.IndexOf("paste", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 p.Name.IndexOf("input", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 p.Name.IndexOf("content", StringComparison.OrdinalIgnoreCase) >= 0));
-
-            if (prop != null)
-            {
-                try { prop.SetValue(win, json ?? ""); win.Repaint(); Debug.Log($"[Paste&Merge Bridge] Injected JSON via property '{prop.Name}'."); return true; }
-                catch { /* ignore */ }
-            }
-
-            // Fallback 2: look for a method like SetPastedText(string) or OpenWithJson(string)
-            var m = t.GetMethods(BF).FirstOrDefault(mi =>
-                mi.GetParameters().Length == 1 &&
-                mi.GetParameters()[0].ParameterType == typeof(string) &&
-                (mi.Name.IndexOf("OpenWithJson", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 mi.Name.IndexOf("SetPasted", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 mi.Name.IndexOf("LoadJson", StringComparison.OrdinalIgnoreCase) >= 0));
-
-            if (m != null)
-            {
-                try { m.Invoke(win, new object[]{ json ?? "" }); win.Repaint(); Debug.Log($"[Paste&Merge Bridge] Injected JSON via method '{m.Name}'."); return true; }
-                catch { /* ignore */ }
-            }
-
-            // Final fallback: clipboard
-            EditorGUIUtility.systemCopyBuffer = json ?? "";
-            Debug.Log("[Paste&Merge Bridge] Copied JSON to clipboard (paste into Pasted Content).");
             return false;
         }
-
-        static void Run(string tag)
-        {
-            var json = Read(tag);
-            var win = OpenOriginalWindow(out var t);
-            if (TrySetPastedContent(win, t, json))
-            {
-                // keep focus on the original window
-                if (win != null) win.Focus();
-            }
-        }
-
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/intents", false, 20)]  static void M0()  => Run("intents");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/lexicon", false, 21)]  static void M1()  => Run("lexicon");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/macros", false, 22)]   static void M2()  => Run("macros");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/commands", false, 23)] static void M3()  => Run("commands");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/fieldmap", false, 24)] static void M4()  => Run("fieldmap");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/registry", false, 25)] static void M5()  => Run("registry");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/schema", false, 26)]   static void M6()  => Run("schema");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/router", false, 27)]   static void M7()  => Run("router");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/nl", false, 28)]       static void M8()  => Run("nl");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/canonical", false, 29)]static void M9()  => Run("canonical");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/diagnostics", false, 30)] static void M10() => Run("diagnostics");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/aliases", false, 31)]  static void M11() => Run("aliases");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/shims", false, 32)]    static void M12() => Run("shims");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/nullable", false, 33)] static void M13() => Run("nullable");
-        [MenuItem("Window/Aim2Pro/Aigg/Paste & Merge/Open with Temp/overrides", false, 34)]static void M14() => Run("overrides");
     }
 }
