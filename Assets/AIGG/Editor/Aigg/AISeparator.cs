@@ -127,7 +127,7 @@ namespace Aim2Pro.AIGG
                         }
                     }
                 }
-                return json.Substring(i, Math.min(j, json.Length) - i).Trim();
+                return json.Substring(i, Math.Min(j, json.Length) - i).Trim();
             }
 
             int k = i;
