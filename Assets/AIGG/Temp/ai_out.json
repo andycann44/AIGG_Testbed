@@ -1,0 +1,11 @@
+{
+  "nlNormalized": "build 100m by 7m track and a left 45 degree curve over 12 rows",
+  "commands": [
+    { "action": "curveRowsOver", "args": { "side": "left", "deg": 45, "rows": 12 } }
+  ],
+  "macros": [],
+  "fieldmap": [ { "alias": "tile spacing", "canonical": "tileSpacing" } ],
+  "lexicon":  [ { "phrase": "chicane", "type": "pattern", "value": "left-right quick s-bend" } ],
+  "canonical": {},
+  "diagnostics": []
+}

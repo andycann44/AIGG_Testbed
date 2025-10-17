@@ -7,15 +7,14 @@ using UnityEngine;
 namespace Aim2Pro.AIGG
 {
     /// <summary>
-    /// Reads Assets/AIGG/Temp/ai_out.json (one merged AI reply) and splits
-    /// known buckets into Assets/AIGG/Temp/temp_*.json. Empty buckets are deleted.
+    /// Reads Assets/AIGG/Temp/ai_out.json and splits known buckets into Assets/AIGG/Temp/temp_*.json.
+    /// Empty buckets are deleted. Idempotent and safe to run repeatedly.
     /// </summary>
     internal static class AISeparator
     {
         public const string Root = "Assets/AIGG/Temp";
         public const string AiOut = Root + "/ai_out.json";
 
-        // Buckets to split
         static readonly string[] Buckets = new[]{
             "commands","macros","fieldmap","lexicon","registry","schema","router",
             "nl","canonical","diagnostics","aliases","shims","nullable","overrides"
@@ -45,8 +44,7 @@ namespace Aim2Pro.AIGG
             {
                 var val = TryExtractTopLevelValue(src, key);
                 var path = Path.Combine(Root, $"temp_{key}.json");
-                if (string.IsNullOrWhiteSpace(val) ||
-                    val == "[]" || val == "{}" || val == "\"\"" )
+                if (string.IsNullOrWhiteSpace(val) || val == "[]" || val == "{}" || val == "\"\"")
                 {
                     if (File.Exists(path)) File.Delete(path);
                     continue;
@@ -72,28 +70,24 @@ namespace Aim2Pro.AIGG
         }
 
         /// <summary>
-        /// Crude but reliable: find `"key": <value>` at top-level and return the raw JSON value.
-        /// Handles object {}, array [], string "", number, true/false/null. No nested parsing needed.
+        /// Extracts the raw JSON value for a top-level key: "key": <value>.
+        /// Handles objects, arrays, strings, numbers, booleans, null. No external JSON lib needed.
         /// </summary>
         static string TryExtractTopLevelValue(string json, string key)
         {
-            // Find the key
             var needle = $"\"{key}\"";
             int i = json.IndexOf(needle, StringComparison.Ordinal);
             if (i < 0) return null;
 
-            // Find colon after the key
             i = json.IndexOf(':', i + needle.Length);
             if (i < 0) return null;
 
-            // Skip whitespace
             i++;
             while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
             if (i >= json.Length) return null;
 
             char c = json[i];
 
-            // String
             if (c == '"')
             {
                 int j = i + 1; bool esc = false;
@@ -107,7 +101,6 @@ namespace Aim2Pro.AIGG
                 return json.Substring(i, Math.Min(j, json.Length) - i);
             }
 
-            // Object/Array with brace counting
             if (c == '{' || c == '[')
             {
                 int depth = 0; char open = c; char close = (c == '{') ? '}' : ']';
@@ -134,10 +127,9 @@ namespace Aim2Pro.AIGG
                         }
                     }
                 }
-                return json.Substring(i, Math.Min(j, json.Length) - i).Trim();
+                return json.Substring(i, Math.min(j, json.Length) - i).Trim();
             }
 
-            // true/false/null or number: read until comma or end/brace
             int k = i;
             while (k < json.Length && ",}]".IndexOf(json[k]) == -1) k++;
             return json.Substring(i, k - i).Trim();

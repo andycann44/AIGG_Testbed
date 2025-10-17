@@ -11,8 +11,7 @@ namespace Aim2Pro.AIGG
             => Path.Combine(AISeparator.Root, "Batches", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
 
         /// <summary>
-        /// Called by Pre-Merge after AI returns a single JSON (merged reply).
-        /// Writes ai_out.json, splits to temp_* buckets, opens Paste & Merge.
+        /// Call this from Pre-Merge when AI returns the single JSON reply.
         /// </summary>
         public static void SaveFromAI(string json)
         {
