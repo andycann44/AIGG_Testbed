@@ -1,35 +1,38 @@
-using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
+    /// <summary>
+    /// Utilities for writing AI output to a stable location that our watcher/separator can consume.
+    /// </summary>
     internal static class TempMerge
     {
-        public static string LatestBatchDir
-            => Path.Combine(AISeparator.Root, "Batches", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        public const string TempRoot = "Assets/AIGG/Temp";
+        public const string AiOutRel  = TempRoot + "/ai_out.json";
 
         /// <summary>
-        /// Call this from Pre-Merge when AI returns the single JSON reply.
+        /// Save a raw JSON string to Assets/AIGG/Temp/ai_out.json and import it so the watcher fires.
         /// </summary>
         public static void SaveFromAI(string json)
         {
-            Directory.CreateDirectory(AISeparator.Root);
-            var path = AISeparator.AiOut;
-            File.WriteAllText(path, json ?? "");
-            Debug.Log($"[TempMerge] Wrote AI output to: {path}
+            if (json == null) json = "";
+            Directory.CreateDirectory(TempRoot);
+            File.WriteAllText(AiOutRel, json);
+            AssetDatabase.ImportAsset(AiOutRel, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+            Debug.Log($"[TempMerge] Wrote AI output to: {AiOutRel}");
+        }
 
-        /// <summary>Accept any object and serialize to JSON (pretty) before saving.</summary>
+        /// <summary>
+        /// Save any object by serializing to JSON first (pretty when possible).
+        /// </summary>
         public static void SaveFromAI(object ai)
         {
             string json;
-            try { json = UnityEngine.JsonUtility.ToJson(ai, true); }
+            try { json = JsonUtility.ToJson(ai, true); }
             catch { json = ai?.ToString() ?? ""; }
             SaveFromAI(json);
-        }
-");
-            AISeparator.SplitAndOpen(path);
         }
     }
 }
