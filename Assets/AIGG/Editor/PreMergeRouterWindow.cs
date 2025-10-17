@@ -161,6 +161,9 @@ namespace Aim2Pro.AIGG {
       try {
         var missing = SpecAudit.FindMissingCommands(canonicalRaw ?? "");
         var fix = AIAutoFix.Ask(apiKey, model, nlInput ?? "", normalized ?? "", canonicalRaw ?? "", unmatched, missing, out var err);
+            // Auto-save AI reply for Paste & Merge
+            try { Aim2Pro.AIGG.TempMerge.SaveFromAI(fix); } catch { }
+
         if (err != null) { Debug.LogWarning("[AIAutoFix] " + err); EditorUtility.DisplayDialog("AI error", err, "OK"); return; }
         
         // If AI provided a canonical JSON, adopt it before spec apply

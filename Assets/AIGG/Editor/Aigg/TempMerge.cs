@@ -18,7 +18,17 @@ namespace Aim2Pro.AIGG
             Directory.CreateDirectory(AISeparator.Root);
             var path = AISeparator.AiOut;
             File.WriteAllText(path, json ?? "");
-            Debug.Log($"[TempMerge] Wrote AI output to: {path}");
+            Debug.Log($"[TempMerge] Wrote AI output to: {path}
+
+        /// <summary>Accept any object and serialize to JSON (pretty) before saving.</summary>
+        public static void SaveFromAI(object ai)
+        {
+            string json;
+            try { json = UnityEngine.JsonUtility.ToJson(ai, true); }
+            catch { json = ai?.ToString() ?? ""; }
+            SaveFromAI(json);
+        }
+");
             AISeparator.SplitAndOpen(path);
         }
     }
