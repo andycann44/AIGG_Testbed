@@ -23,22 +23,6 @@
         {
             "key": "obstacles",
             "value": "track.obstacles"
-        },
-        {
-            "key": "track.length",
-            "value": "100"
-        },
-        {
-            "key": "track.width",
-            "value": "0"
-        },
-        {
-            "key": "track.tileSpacing",
-            "value": "1"
-        },
-        {
-            "key": "track.killzoneY",
-            "value": "-5"
         }
     ]
 }

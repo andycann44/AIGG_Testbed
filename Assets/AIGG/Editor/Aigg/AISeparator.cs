@@ -8,7 +8,7 @@ namespace Aim2Pro.AIGG
 {
     /// <summary>
     /// Reads Assets/AIGG/Temp/ai_out.json and splits known buckets into Assets/AIGG/Temp/temp_*.json.
-    /// Empty buckets are deleted. Idempotent and safe to run repeatedly.
+    /// Uses AssetDatabase for writes/deletes so .meta files are handled correctly.
     /// </summary>
     internal static class AISeparator
     {
@@ -40,20 +40,31 @@ namespace Aim2Pro.AIGG
             }
 
             int written = 0;
-            foreach (var key in Buckets)
+
+            AssetDatabase.StartAssetEditing();
+            try
             {
-                var val = TryExtractTopLevelValue(src, key);
-                var path = Path.Combine(Root, $"temp_{key}.json");
-                if (string.IsNullOrWhiteSpace(val) || val == "[]" || val == "{}" || val == "\"\"")
+                foreach (var key in Buckets)
                 {
-                    if (File.Exists(path)) File.Delete(path);
-                    continue;
+                    var val = TryExtractTopLevelValue(src, key);
+                    var path = Path.Combine(Root, $"temp_{key}.json").Replace("\\", "/");
+
+                    if (string.IsNullOrWhiteSpace(val) || val == "[]" || val == "{}" || val == "\"\"")
+                    {
+                        DeleteAssetIfExists(path);
+                        continue;
+                    }
+
+                    WriteTextAsset(path, val);
+                    written++;
                 }
-                File.WriteAllText(path, val);
-                written++;
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             }
 
-            AssetDatabase.Refresh();
             Debug.Log($"[AISeparator] Wrote {written} bucket file(s) from {aiOutPath}");
             return written;
         }
@@ -69,9 +80,25 @@ namespace Aim2Pro.AIGG
             return n;
         }
 
+        static void WriteTextAsset(string assetPath, string contents)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(assetPath));
+            File.WriteAllText(assetPath, contents ?? "");
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        static void DeleteAssetIfExists(string assetPath)
+        {
+            // Use AssetDatabase so Unity removes the .meta as well.
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath) != null || File.Exists(assetPath))
+            {
+                AssetDatabase.DeleteAsset(assetPath);
+            }
+        }
+
         /// <summary>
-        /// Extracts the raw JSON value for a top-level key: "key": <value>.
-        /// Handles objects, arrays, strings, numbers, booleans, null. No external JSON lib needed.
+        /// Extract the raw JSON value for a top-level key: "key": <value>.
+        /// Handles objects, arrays, strings, numbers, booleans, null.
         /// </summary>
         static string TryExtractTopLevelValue(string json, string key)
         {

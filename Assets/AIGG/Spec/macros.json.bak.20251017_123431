@@ -2,8 +2,6 @@
     "macros": [
         "then",
         "zigzag",
-        "over",
-        "random",
-        "corners"
+        "over"
     ]
 }

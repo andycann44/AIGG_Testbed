@@ -47,9 +47,6 @@
         },
         {
             "name": "zigzagRows"
-        },
-        {
-            "name": "buildTrack"
         }
     ]
 }
