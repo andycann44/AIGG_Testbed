@@ -1,12 +1,23 @@
 {
-  "nlNormalized": "build 100m by 7m track and a left 45 degree curve over 12 rows",
-  "commands": [
-    { "action": "curveRowsOver", "args": { "side": "left", "deg": 45, "rows": 12 } }
-  ],
-  "macros": [],
-  "fieldmap": [ { "alias": "tile spacing", "canonical": "tileSpacing" } ],
-  "lexicon":  [ { "phrase": "chicane", "type": "pattern", "value": "left-right quick s-bend" } ],
-  "canonical": {},
-  "diagnostics": []
+    "commands": [
+        "createTrack",
+        "chicanesLeft",
+        "chicanesRight"
+    ],
+    "macros": [
+        "then",
+        "and",
+        "over"
+    ],
+    "fieldMap": [
+        {
+            "key": "tiles missing",
+            "value": "track.missingTileChance"
+        },
+        {
+            "key": "gaps",
+            "value": "track.gapChance"
+        }
+    ],
+    "canonical": "{\n    \"track\": {\n      \"length\": 300,\n      \"width\": 7,\n      \"tileSpacing\": 1,\n      \"killzoneY\": -5,\n      \"obstacles\": [],\n      \"missingTileChance\": 15,\n      \"gapChance\": 3\n    },\n    \"plan\": [\n      {\"action\": \"curveRowsOver\", \"args\": {\"side\": \"left\", \"deg\": 45, \"rows\": 8}},\n      {\"action\": \"curveRowsOver\", \"args\": {\"side\": \"right\", \"deg\": 45, \"rows\": 8}}\n    ]\n  }"
 }
-

@@ -1,3 +1,5 @@
 [
-    { "action": "curveRowsOver", "args": { "side": "left", "deg": 45, "rows": 12 } }
-  ]
+        "createTrack",
+        "chicanesLeft",
+        "chicanesRight"
+    ]

@@ -1,1 +1,1 @@
-"tileSpacing"
+"{\n    \"track\": {\n      \"length\": 300,\n      \"width\": 7,\n      \"tileSpacing\": 1,\n      \"killzoneY\": -5,\n      \"obstacles\": [],\n      \"missingTileChance\": 15,\n      \"gapChance\": 3\n    },\n    \"plan\": [\n      {\"action\": \"curveRowsOver\", \"args\": {\"side\": \"left\", \"deg\": 45, \"rows\": 8}},\n      {\"action\": \"curveRowsOver\", \"args\": {\"side\": \"right\", \"deg\": 45, \"rows\": 8}}\n    ]\n  }"

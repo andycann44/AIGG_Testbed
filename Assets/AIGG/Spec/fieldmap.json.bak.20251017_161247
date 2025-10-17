@@ -39,10 +39,6 @@
         {
             "key": "track.killzoneY",
             "value": "-5"
-        },
-        {
-            "key": "gaps",
-            "value": "track.gapChance"
         }
     ]
 }

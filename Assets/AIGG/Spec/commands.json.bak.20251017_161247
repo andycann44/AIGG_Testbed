@@ -50,15 +50,6 @@
         },
         {
             "name": "buildTrack"
-        },
-        {
-            "name": "createTrack"
-        },
-        {
-            "name": "chicanesLeft"
-        },
-        {
-            "name": "chicanesRight"
         }
     ]
 }
