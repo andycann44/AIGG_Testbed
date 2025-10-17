@@ -6,10 +6,6 @@ using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
-    /// <summary>
-    /// Reads Assets/AIGG/Temp/ai_out.json and splits known buckets into Assets/AIGG/Temp/temp_*.json.
-    /// Uses AssetDatabase for writes/deletes so .meta files are handled correctly.
-    /// </summary>
     internal static class AISeparator
     {
         public const string Root = "Assets/AIGG/Temp";
@@ -20,7 +16,7 @@ namespace Aim2Pro.AIGG
             "nl","canonical","diagnostics","aliases","shims","nullable","overrides"
         };
 
-        [MenuItem("Window/Aim2Pro/Aigg/API/Split AI Output Now")]
+        [MenuItem("Window/Aim2Pro/Aigg/API/Split AI Output Now", priority = 501)]
         public static void MenuSplit() => SplitAndOpen();
 
         public static int Split(string aiOutPath = AiOut)
@@ -40,7 +36,6 @@ namespace Aim2Pro.AIGG
             }
 
             int written = 0;
-
             AssetDatabase.StartAssetEditing();
             try
             {
@@ -72,7 +67,6 @@ namespace Aim2Pro.AIGG
         public static int SplitAndOpen(string aiOutPath = AiOut)
         {
             int n = Split(aiOutPath);
-            // bring up original Paste & Merge window (non-destructive)
             var t = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
                 .FirstOrDefault(x => x.Name == "SpecPasteMergeWindow" && typeof(EditorWindow).IsAssignableFrom(x));
@@ -84,22 +78,18 @@ namespace Aim2Pro.AIGG
         {
             Directory.CreateDirectory(Path.GetDirectoryName(assetPath));
             File.WriteAllText(assetPath, contents ?? "");
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
         }
 
         static void DeleteAssetIfExists(string assetPath)
         {
-            // Use AssetDatabase so Unity removes the .meta as well.
             if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath) != null || File.Exists(assetPath))
             {
                 AssetDatabase.DeleteAsset(assetPath);
             }
         }
 
-        /// <summary>
-        /// Extract the raw JSON value for a top-level key: "key": <value>.
-        /// Handles objects, arrays, strings, numbers, booleans, null.
-        /// </summary>
+        // Extract raw JSON value for top-level "key": <value>
         static string TryExtractTopLevelValue(string json, string key)
         {
             var needle = $"\"{key}\"";
@@ -131,8 +121,7 @@ namespace Aim2Pro.AIGG
             if (c == '{' || c == '[')
             {
                 int depth = 0; char open = c; char close = (c == '{') ? '}' : ']';
-                int j = i;
-                bool inStr = false; bool esc = false;
+                int j = i; bool inStr = false; bool esc = false;
                 for (; j < json.Length; j++)
                 {
                     char ch = json[j];
