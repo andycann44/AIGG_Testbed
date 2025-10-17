@@ -6,12 +6,18 @@ using UnityEngine;
 
 namespace Aim2Pro.AIGG
 {
-    // One tiny utility: no watchers, no semantics changes, all in Temp.
+    // Minimal: one file, no watchers, no merge-semantic changes.
     public static class PreMergeTempTools
     {
         private const string TempDir = "Assets/AIGG/Temp";
+
+        // Full 15-bucket set we agreed:
+        // 7 canonical spec buckets + 8 extended buckets for track details & diagnostics.
         private static readonly string[] Buckets = {
-            "intents","lexicon","macros","commands","fieldmap","registry","schema"
+            // canonical spec
+            "intents","lexicon","macros","commands","fieldmap","registry","schema",
+            // extended
+            "track","hazards","materials","tiles","curves","chicanes","validation","diagnostics"
         };
 
         [MenuItem("Window/Aim2Pro/Aigg/Reveal AI Output Folder")]
@@ -50,7 +56,7 @@ namespace Aim2Pro.AIGG
                     if (!string.IsNullOrEmpty(payload))
                         File.WriteAllText(outPath, payload + "\n", Encoding.UTF8);
                     else if (!File.Exists(outPath))
-                        File.WriteAllText(outPath, "{}\n", Encoding.UTF8);
+                        File.WriteAllText(outPath, "{}\n", Encoding.UTF8); // scaffold, non-destructive
                 }
                 catch (Exception ex)
                 {
@@ -59,7 +65,7 @@ namespace Aim2Pro.AIGG
             }
 
             AssetDatabase.Refresh();
-            EditorUtility.DisplayDialog("Split AI Output", "Buckets updated in Assets/AIGG/Temp/.", "OK");
+            EditorUtility.DisplayDialog("Split AI Output", "Updated temp_*.json under Assets/AIGG/Temp/.", "OK");
         }
 
         private static void EnsureTempDir()
@@ -67,7 +73,8 @@ namespace Aim2Pro.AIGG
             if (!Directory.Exists(TempDir)) Directory.CreateDirectory(TempDir);
         }
 
-        // Minimal top-level JSON extractor (expects well-formed AI output).
+        // Minimal top-level extractor (expects well-formed JSON).
+        // Returns the value text of a top-level key if it is an object {…}, array […], or primitive.
         private static string ExtractTopLevel(string src, string key)
         {
             string needle = $"\"{key}\"";
